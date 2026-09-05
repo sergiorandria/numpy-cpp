@@ -4,8 +4,8 @@ build-backend = "setuptools.build_meta"
 
 [project]
 name = "numpy-cpp"
-version = "2.2.0"
-description = "numpy-cpp Python bridge — header-only C++20 NumPy 2.2"
+version = "1.0.0"
+description = "numpy-cpp Python bridge — header-only C++20 NumPy 1.0 — production ready"
 readme = "README.md"
 requires-python = ">=3.8"
 license = {text = "BSD-3-Clause"}

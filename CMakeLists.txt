@@ -1,7 +1,7 @@
 cmake_minimum_required(VERSION 3.20)
 project(numpy-cpp
-  VERSION 2.2.0
-  DESCRIPTION "Header-only C++20 NumPy 2.2 — 712 routines, zero Python runtime"
+  VERSION 1.0.0
+  DESCRIPTION "Header-only C++20 NumPy 1.0 — 712 routines, zero Python runtime, production ready"
   HOMEPAGE_URL "https://github.com/sergiorandria/numpy-cpp"
   LANGUAGES CXX)
 

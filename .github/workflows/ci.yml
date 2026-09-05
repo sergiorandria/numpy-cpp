@@ -20,6 +20,35 @@ jobs:
       - name: Bench hardware (smoke)
         run: ./build/tests/bench_hardware || true
 
+  sanitize:
+    runs-on: ubuntu-latest
+    strategy:
+      fail-fast: false
+      matrix:
+        sanitizer: [asan, ubsan, tsan]
+        include:
+          - sanitizer: asan
+            cmake_args: -DNP_ENABLE_SANITIZERS=ON -DNP_ENABLE_TSAN=OFF
+            name: Address
+          - sanitizer: ubsan
+            cmake_args: -DNP_ENABLE_SANITIZERS=ON -DNP_ENABLE_TSAN=OFF
+            name: Undefined
+          - sanitizer: tsan
+            cmake_args: -DNP_ENABLE_TSAN=ON -DNP_ENABLE_SANITIZERS=OFF
+            name: Thread
+    steps:
+      - uses: actions/checkout@v4
+      - name: Configure (${{ matrix.name }})
+        run: cmake -S . -B build-${{ matrix.sanitizer }} -DCMAKE_BUILD_TYPE=Debug ${{ matrix.cmake_args }} -DNP_WERROR=ON
+      - name: Build
+        run: cmake --build build-${{ matrix.sanitizer }} -j8
+      - name: Test with ${{ matrix.name }} sanitizer
+        run: ctest --test-dir build-${{ matrix.sanitizer }} --output-on-failure
+        env:
+          ASAN_OPTIONS: detect_leaks=1:strict_string_checks=1:detect_stack_use_after_return=1
+          UBSAN_OPTIONS: print_stacktrace=1
+          TSAN_OPTIONS: second_deadlock_stack=1
+
   ctest-asan:
     runs-on: ubuntu-latest
     steps:
@@ -33,15 +62,16 @@ jobs:
 
   lint:
     runs-on: ubuntu-latest
-    continue-on-error: true
     steps:
       - uses: actions/checkout@v4
       - name: Install clang-tidy
         run: sudo apt-get update && sudo apt-get install -y clang-tidy
       - name: Configure (clang-tidy)
-        run: cmake -S . -B build-tidy -DCMAKE_BUILD_TYPE=Release -DNP_ENABLE_TIDY=ON -DNP_WERROR=ON
+        run: cmake -S . -B build-tidy -DCMAKE_BUILD_TYPE=Release -DNP_ENABLE_TIDY=ON -DNP_WERROR=ON -DCMAKE_CXX_CLANG_TIDY="clang-tidy;-checks=bugprone-*,modernize-*,performance-*,cppcoreguidelines-*;-warnings-as-errors=*"
       - name: Build (tidy)
-        run: cmake --build build-tidy -j8 2>&1 | tee tidy.log; test ${PIPESTATUS[0]} -eq 0 || echo "tidy warnings (non-blocking)"
+        run: cmake --build build-tidy -j8 2>&1 | tee tidy.log
+      - name: Check tidy log
+        run: if grep -q "warning:" tidy.log; then echo "clang-tidy warnings found"; cat tidy.log; exit 1; fi
 
   isabelle:
     runs-on: ubuntu-latest
@@ -56,6 +86,30 @@ jobs:
             if [ -n "$ISABIN" ]; then export PATH="$(dirname "$ISABIN"):$PATH"; fi
           fi
           isabelle build -D isabelle -v
+
+  benchmark:
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+      - name: Configure (Release + AVX2)
+        run: cmake -S . -B build-bench -DCMAKE_BUILD_TYPE=Release -DNP_ENABLE_AVX2=ON -DNP_WERROR=ON
+      - name: Build bench
+        run: cmake --build build-bench --target bench_hardware bench_math -j8
+      - name: Run HBM/tensor/analog bench
+        run: ./build-bench/tests/bench_hardware 2>&1 | tee bench_hardware.log
+      - name: Run math bench (AVX)
+        run: ./build-bench/tests/bench_math 2>&1 | tee bench_math.log
+      - name: Upload bench logs
+        uses: actions/upload-artifact@v4
+        with:
+          name: bench-logs
+          path: |
+            bench_hardware.log
+            bench_math.log
+      - name: Check PERFORMANCE.md freshness
+        run: |
+          echo "Checking if bench numbers match PERFORMANCE.md..."
+          grep -q "copyto" docs/PERFORMANCE.md || (echo "PERFORMANCE.md missing copyto bench" && exit 1)
 
   examples:
     runs-on: ubuntu-latest
