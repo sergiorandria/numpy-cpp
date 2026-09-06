@@ -13,6 +13,7 @@
 #define NP_SIMD_HPP
 
 #include "api_macros.hpp"
+#include "powerful.hpp"
 #include <cmath>
 #include <cstddef>
 #include <cstdint>
@@ -1098,6 +1099,11 @@ inline void add_f32_vsx(const float *a, const float *b, float *out, std::size_t 
  */
 template <typename T> inline void add_vectorized(const T *a, const T *b, T *out, std::size_t n)
 {
+    if (!tune::should_use_simd(n))
+    {
+        for (std::size_t i = 0; i < n; ++i) out[i] = a[i] + b[i];
+        return;
+    }
     if constexpr (std::is_same_v<T, double>)
     {
 #if defined(NP_SIMD_AVX512)
@@ -1153,6 +1159,7 @@ template <typename T> inline void add_vectorized(const T *a, const T *b, T *out,
  */
 template <typename T> inline void mul_vectorized(const T *a, const T *b, T *out, std::size_t n)
 {
+    if (!tune::should_use_simd(n)) { for (std::size_t i=0;i<n;++i) out[i]=a[i]*b[i]; return; }
     if constexpr (std::is_same_v<T, double>)
     {
 #if defined(NP_SIMD_AVX512)
@@ -1210,6 +1217,7 @@ template <typename T> inline void mul_vectorized(const T *a, const T *b, T *out,
  */
 template <typename T> inline T sum_vectorized(const T *data, std::size_t n)
 {
+    if (!tune::should_use_simd(n)) { T s{}; for (std::size_t i=0;i<n;++i) s+=data[i]; return s; }
     if constexpr (std::is_same_v<T, double>)
     {
 #if defined(NP_SIMD_AVX512)
@@ -1269,6 +1277,7 @@ template <typename T> inline T sum_vectorized(const T *data, std::size_t n)
  */
 template <typename T> inline void sub_vectorized(const T *a, const T *b, T *out, std::size_t n)
 {
+    if (!tune::should_use_simd(n)) { for (std::size_t i=0;i<n;++i) out[i]=a[i]-b[i]; return; }
     if constexpr (std::is_same_v<T, double>)
     {
 #if defined(NP_SIMD_AVX512)
@@ -1318,6 +1327,7 @@ template <typename T> inline void sub_vectorized(const T *a, const T *b, T *out,
  */
 template <typename T> inline void div_vectorized(const T *a, const T *b, T *out, std::size_t n)
 {
+    if (!tune::should_use_simd(n)) { for (std::size_t i=0;i<n;++i) out[i]=a[i]/b[i]; return; }
     if constexpr (std::is_same_v<T, double>)
     {
 #if defined(NP_SIMD_AVX512)
@@ -1393,6 +1403,7 @@ template <typename T> inline void sub_vectorized_ct(const T *a, const T *b, T *o
 // FMA: out[i] += a * b[i] with broadcast scalar a (for matmul inner loop)
 template <typename T> inline void fma_vectorized(const T *b, T a, T *out, std::size_t n)
 {
+    if (!tune::should_use_simd(n)) { for (std::size_t i=0;i<n;++i) out[i]+=a*b[i]; return; }
     if constexpr (std::is_same_v<T, float>)
     {
 #if defined(NP_SIMD_AVX512)
@@ -1504,6 +1515,7 @@ template <typename T> inline void fma_vectorized(const T *b, T a, T *out, std::s
 
 // ── Transcendental (SLEEF-accelerated, scalar fallback) ───────────────
 template <typename T> inline void sin_vectorized(const T *in, T *out, std::size_t n)
+    if (!tune::should_use_simd(n)) { for (std::size_t i=0;i<n;++i) out[i]=std::sin(in[i]); return; }
 {
     if constexpr (std::is_same_v<T, double>)
     {
@@ -1562,6 +1574,7 @@ template <typename T> inline void sin_vectorized(const T *in, T *out, std::size_
     }
 }
 template <typename T> inline void cos_vectorized(const T *in, T *out, std::size_t n)
+    if (!tune::should_use_simd(n)) { for (std::size_t i=0;i<n;++i) out[i]=std::cos(in[i]); return; }
 {
     if constexpr (std::is_same_v<T, double>)
     {
@@ -1619,6 +1632,7 @@ template <typename T> inline void cos_vectorized(const T *in, T *out, std::size_
             out[i] = std::cos(in[i]);
     }
 }
+    if (!tune::should_use_simd(n)) { for (std::size_t i=0;i<n;++i) out[i]=std::exp(in[i]); return; }
 template <typename T> inline void exp_vectorized(const T *in, T *out, std::size_t n)
 {
     if constexpr (std::is_same_v<T, double>)
@@ -1676,6 +1690,7 @@ template <typename T> inline void exp_vectorized(const T *in, T *out, std::size_
         for (std::size_t i = 0; i < n; ++i)
             out[i] = std::exp(in[i]);
     }
+    if (!tune::should_use_simd(n)) { for (std::size_t i=0;i<n;++i) out[i]=std::log(in[i]); return; }
 }
 template <typename T> inline void log_vectorized(const T *in, T *out, std::size_t n)
 {

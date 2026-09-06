@@ -26,6 +26,7 @@
 
 #include "api_macros.hpp"
 #include "cuda.hpp"
+#include "powerful.hpp"
 #include <cmath>
 #include <complex>
 #include <cstddef>
@@ -499,8 +500,8 @@ inline bool probe_cufft() noexcept
 template <typename Cplx>
 NP_NODISCARD inline bool try_fft(const Cplx *in, Cplx *out, std::size_t N, bool inverse) noexcept
 {
-    if (N < 8192)
-        return false; // CPU radix2 already very fast for small N
+    if (N < tune::fft_threshold())
+        return false; // CPU radix2 already very fast for small N (tune::fft_threshold)
     if (!is_available())
         return false;
 #if defined(NP_GPU_HAS_CUDA_RUNTIME) && defined(NP_ENABLE_CUDA)

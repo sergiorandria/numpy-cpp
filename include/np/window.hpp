@@ -16,6 +16,7 @@
 
 #include "api_macros.hpp"
 #include "ndarray.hpp"
+#include "powerful.hpp"
 
 namespace np
 {
