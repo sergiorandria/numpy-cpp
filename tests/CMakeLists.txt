@@ -34,7 +34,14 @@ set(NP_TESTS
     test_memristor
     test_photonics
     test_quantum
-    test_accelerator)
+    test_accelerator
+    test_io
+    test_polynomial
+    test_sorting
+    test_bitwise
+    test_window
+    test_functional
+    test_indexing)
 
 if(NP_COMPILED_UNITS)
     list(APPEND NP_TESTS test_constexpr test_compile_time)

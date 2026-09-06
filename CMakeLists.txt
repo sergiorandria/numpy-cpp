@@ -1,7 +1,7 @@
 cmake_minimum_required(VERSION 3.20)
 project(numpy-cpp
-  VERSION 2.2.0
-  DESCRIPTION "Header-only C++20 NumPy 2.2 — 712 routines, zero Python runtime"
+  VERSION 1.0.0
+  DESCRIPTION "Header-only C++20 NumPy 1.0 — 712 routines, zero Python runtime, production ready"
   HOMEPAGE_URL "https://github.com/sergiorandria/numpy-cpp"
   LANGUAGES CXX)
 
@@ -10,7 +10,46 @@ set(CMAKE_CXX_STANDARD_REQUIRED ON)
 set(CMAKE_CXX_EXTENSIONS OFF)
 
 if(NOT CMAKE_CXX_COMPILER_ID MATCHES "MSVC")
-    add_compile_options(-Wall -Wextra)
+    add_compile_options(-Wall -Wextra -Wpedantic)
+    # Treat warnings as errors in CI (ALLOW opt-out via NP_WERROR=OFF)
+    option(NP_WERROR "Treat warnings as errors" ON)
+    if(NP_WERROR)
+        add_compile_options(-Werror)
+        # Allowlist: intentional parity shims and low-risk warnings (fix incrementally)
+        add_compile_options(-Wno-error=deprecated-declarations
+                            -Wno-error=unused-variable
+                            -Wno-error=unused-parameter
+                            -Wno-error=unused-local-typedefs
+                            -Wno-error=sign-compare
+                            -Wno-error=reorder
+                            -Wno-error=unused-result
+                            -Wno-error=unused-but-set-variable
+                            -Wno-error=unused-function)
+        if(CMAKE_CXX_COMPILER_ID MATCHES "Clang")
+            add_compile_options(-Wno-error=braced-scalar-init)
+            add_compile_options(-Wno-error=unused-but-set-variable)
+        endif()
+    endif()
+    # Sanitizers (opt-in via -DNP_ENABLE_SANITIZERS=ON; CI runs asan/ubsan matrix)
+    option(NP_ENABLE_SANITIZERS "Enable Address+Undefined sanitizers" OFF)
+    if(NP_ENABLE_SANITIZERS)
+        add_compile_options(-fsanitize=address,undefined -fno-omit-frame-pointer)
+        add_link_options(-fsanitize=address,undefined)
+    endif()
+    # Thread sanitizer is mutually exclusive with ASan; use -DNP_ENABLE_TSAN=ON
+    option(NP_ENABLE_TSAN "Enable Thread sanitizer (mutually exclusive with ASan)" OFF)
+    if(NP_ENABLE_TSAN)
+        add_compile_options(-fsanitize=thread -fno-omit-frame-pointer)
+        add_link_options(-fsanitize=thread)
+    endif()
+    # clang-tidy (opt-in; CI runs with -DNP_ENABLE_TIDY=ON)
+    option(NP_ENABLE_TIDY "Enable clang-tidy" OFF)
+    if(NP_ENABLE_TIDY)
+        find_program(CLANG_TIDY_EXE NAMES clang-tidy)
+        if(CLANG_TIDY_EXE)
+            set(CMAKE_CXX_CLANG_TIDY "${CLANG_TIDY_EXE};-checks=bugprone-*,modernize-*,performance-*,cppcoreguidelines-*")
+        endif()
+    endif()
 endif()
 
 # SIMD optimization options
@@ -22,6 +61,7 @@ option(NP_ENABLE_RVV "Enable RISC-V Vector (RVV 1.0) when targeting riscv64" OFF
 option(NP_ENABLE_WASM_SIMD "Enable WASM SIMD128 when targeting wasm32/wasm64" OFF)
 option(NP_ENABLE_SVE "Enable ARM SVE/SVE2 when targeting aarch64" OFF)
 option(NP_ENABLE_VSX "Enable POWER VSX when targeting powerpc64" OFF)
+option(NP_ENABLE_SLEEF "Enable SLEEF for vectorized transcendental (sin/cos/exp/log) via FetchContent" OFF)
 option(NP_ENABLE_OPENMP "Enable OpenMP for multi-core + GPU offload (powerful CPUs)" OFF)
 option(NP_ENABLE_GPU "Enable GPU dispatch (OpenMP target + CUDA driver via dlopen)" OFF)
 option(NP_ENABLE_CUDA "Enable CUDA runtime (requires CUDA toolkit, implies GPU)" OFF)
@@ -92,6 +132,18 @@ if(NP_ENABLE_SIMD)
         if(NOT MSVC AND NP_ENABLE_VSX)
             add_compile_options(-mcpu=power9 -mvsx)
         endif()
+    endif()
+endif()
+if(NP_ENABLE_SLEEF)
+    include(FetchContent)
+    FetchContent_Declare(sleef GIT_REPOSITORY https://github.com/shibatch/sleef.git GIT_TAG 3.7.0)
+    set(SLEEF_BUILD_TESTS OFF CACHE BOOL "" FORCE)
+    set(SLEEF_BUILD_GNUABI_LIBS OFF CACHE BOOL "" FORCE)
+    FetchContent_MakeAvailable(sleef)
+    # sleef provides sleef target; link if available
+    if(TARGET sleef)
+        # header-only usage via INTERFACE
+        message(STATUS "SLEEF enabled (FetchContent 3.7.0)")
     endif()
 endif()
 if(NP_ENABLE_PQC)
@@ -195,6 +247,17 @@ find_library(DL_LIB dl)
 if(DL_LIB)
     target_link_libraries(numpy-cpp INTERFACE ${DL_LIB})
 endif()
+find_package(ZLIB QUIET)
+if(ZLIB_FOUND)
+    target_link_libraries(numpy-cpp INTERFACE ZLIB::ZLIB)
+    target_compile_definitions(numpy-cpp INTERFACE NP_HAS_ZLIB=1)
+endif()
+if(NP_ENABLE_SLEEF)
+    if(TARGET sleef)
+        target_link_libraries(numpy-cpp INTERFACE sleef)
+    endif()
+    target_compile_definitions(numpy-cpp INTERFACE NP_HAS_SLEEF=1 NP_ENABLE_SLEEF=1)
+endif()
 if(NP_ENABLE_GMP AND GMP_LIB)
     target_link_libraries(numpy-cpp INTERFACE ${GMP_LIB})
     target_include_directories(numpy-cpp INTERFACE ${GMP_INCLUDE_DIR})
@@ -266,8 +329,12 @@ if(NP_ENABLE_LLVM)
   if(LLVM_FOUND)
     message(STATUS "LLVM found ${LLVM_PACKAGE_VERSION} — differential JIT enabled")
     if(DEFINED LLVM_DEFINITIONS)
-      target_compile_definitions(numpy-cpp-llvm PUBLIC ${LLVM_DEFINITIONS})
-      target_compile_definitions(numpy-cpp INTERFACE ${LLVM_DEFINITIONS})
+      # LLVM_DEFINITIONS may contain -std=c++17 which clashes with our C++20 — filter it
+      string(REPLACE "-std=c++17" "" LLVM_DEFINITIONS_CLEAN "${LLVM_DEFINITIONS}")
+      string(REPLACE "-std=c++14" "" LLVM_DEFINITIONS_CLEAN "${LLVM_DEFINITIONS_CLEAN}")
+      separate_arguments(LLVM_DEFINITIONS_CLEAN)
+      target_compile_definitions(numpy-cpp-llvm PUBLIC ${LLVM_DEFINITIONS_CLEAN})
+      target_compile_definitions(numpy-cpp INTERFACE ${LLVM_DEFINITIONS_CLEAN})
     endif()
     if(DEFINED LLVM_INCLUDE_DIRS)
       target_include_directories(numpy-cpp-llvm PUBLIC ${LLVM_INCLUDE_DIRS})

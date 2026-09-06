@@ -13,11 +13,17 @@ jobs:
       - uses: actions/setup-python@v5
         with:
           python-version: "3.11"
-      - name: Build sdist
+      - name: Build sdist+wheel
         run: |
           pip install build
-          python -m build --sdist --outdir dist python/
+          python -m build --sdist --wheel --outdir dist python/
+          ls -lh dist/
+          # Also try manylinux wheel via cibuildwheel if available (best effort)
+          pip install cibuildwheel || true
+          cibuildwheel --output-dir dist python/ || echo "cibuildwheel skip (no Docker)"
+          ls -lh dist/
       - name: Publish to PyPI
         uses: pypa/gh-action-pypi-publish@release/v1
         with:
           skip-existing: true
+          verbose: true

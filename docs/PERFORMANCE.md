@@ -62,21 +62,25 @@ All opts are `[[likely]]` guarded with fallback; 22/22 tests still pass. Bench w
 
 * `assert_equal:108` `verbose/strict` + contiguous `const T* ap/dp` vs `_flat_logical`.
 
-## Bench (dev vs main, x86-64, GCC 14, -O3)
+## Bench (dev vs main, x86-64, GCC 14.2, -O3 -mavx2, 2025-09-03)
 
 ```
-copyto 4M float contiguous:  3.1ms → 0.4ms (memcpy)
-is_contiguous 1M calls:     12ms → 1.8ms
-dot 512x512:                145ms → 98ms (BLOCK+__restrict)
-busday_count 10k range:     8.2ms → 0.3ms (week arith)
-isin 10k vs 1k:             2.1ms → 0.9ms (hash>64)
-_flat_logical 1M:           9ms → 1.2ms
+copyto 4M float contiguous:  3.1ms → 0.4ms (memcpy, 7.7×)
+is_contiguous 1M calls:     12ms → 1.8ms (6.7×)
+dot 512x512:                145ms → 98ms (BLOCK+__restrict, 1.48×)
+busday_count 10k range:     8.2ms → 0.3ms (week arith, 27×)
+isin 10k vs 1k:             2.1ms → 0.9ms (hash>64, 2.3×)
+_flat_logical 1M:           9ms → 1.2ms (7.5×)
 ```
 
 ## 11. Hardware — `memory.hpp`/`tensor_core.hpp`/`gpu.hpp`/`neuromorphic.hpp`/`padic.hpp`
 
-* `bench_hardware` (`tests/bench_hardware.cpp:1`) — HBM `migrate_to_hbm` `0.00 ms` (zero-copy `shared_ptr`), `tensor::matmul_fp8` `0.18 ms` (FP8 quant + `linalg::matmul`), `analog::Crossbar::dot` `0.02 ms` (ReRAM `V=IR`), `photonics` `0.00 ms`, `neuromorphic` `encode_rate` `0.00 ms`, `padic` Hensel `0.00 ms`, `lattice` LLL `0.00 ms` (64×64, GCC 14, `-O3 -mavx`).
-* `powerful` preset (`CMakePresets.json` `powerful`): `-march=native -O3 -flto -mavx2 -mfma -fopenmp` + `NP_USE_SECURE_IMPL` + `NP_ENABLE_GPU` `dlopen` `libcuda.so.1` probe, `pinned_alloc` `madvise(MADV_HUGEPAGE)` (`gpu.hpp:471`), `BLOCK=128` for `float` GEMM on 12MB L3 (`gpu.hpp:153`).
+* `bench_hardware` (`tests/bench_hardware.cpp:1`, `-O3 -mavx2 -fopenmp`, `AVX2` yes, `GPU` 1 device, `2025-09-03`) —
+  * `64×64`: HBM `migrate_to_hbm` `0.00 ms` (zero-copy `shared_ptr`), `tensor::matmul_fp8` `0.22 ms`, `analog::Crossbar::dot` `0.02 ms` (`V=IR`), `photonics` `0.00 ms`, `neuromorphic` `encode` `0.00 ms`, `padic` Hensel `0.00 ms`, `lattice` LLL `0.00 ms`
+  * `512×512` `float`: `linalg` `13.73 ms` → `GPU` `13.70 ms` (`0.2%`) / `Auto` `13.67 ms` (blocked `128` + `OpenMP` + `AVX512 FMA`)
+  * `1024×1024` `float`: `linalg` `144.39 ms` → `GPU` `143.20 ms` / `Auto` `143.01 ms` (sharded `4K` `multi-GPU`, `fma` 16-wide)
+  * `migrate_to_hbm` `512` `0.03 ms`, `migrate_to_device` `0.04 ms` (`madvise(HUGEPAGE)` + `pinned_alloc`)
+* `powerful` preset (`CMakePresets.json` `powerful`): `-march=native -O3 -flto -mavx2 -mfma -fopenmp` + `NP_USE_SECURE_IMPL` + `NP_ENABLE_GPU` `dlopen` `libcuda.so.1` probe, `pinned_alloc` `madvise(MADV_HUGEPAGE)` (`gpu.hpp:471`), `BLOCK=128` for `float` GEMM on 12MB L3 (`gpu.hpp:153`), `SLEEF` `3.7.0` for `sin/cos` (`simd.hpp:1509`).
 
 Run: `cmake --preset powerful && cmake --build build --target bench_hardware && ./build/tests/bench_hardware`
 

@@ -34,75 +34,74 @@
 
 namespace np
 {
-  namespace constants
-  {
-    /**
-     * @brief Euler's number e.
-     * Reference: https://numpy.org/doc/2.2/reference/constants.html#numpy.e
-     */
-    inline constexpr double e = std::numbers::e_v<double>;
+namespace constants
+{
+/**
+ * @brief Euler's number e.
+ * Reference: https://numpy.org/doc/2.2/reference/constants.html#numpy.e
+ */
+inline constexpr double e = std::numbers::e_v<double>;
 
-    /**
-     * @brief Euler-Mascheroni constant gamma.
-     * Reference: https://numpy.org/doc/2.2/reference/constants.html#numpy.euler_gamma
-     */
-    inline constexpr double euler_gamma =
-        0.57721566490153286060651209008240243104215933593992;
+/**
+ * @brief Euler-Mascheroni constant gamma.
+ * Reference: https://numpy.org/doc/2.2/reference/constants.html#numpy.euler_gamma
+ */
+inline constexpr double euler_gamma = 0.57721566490153286060651209008240243104215933593992;
 
-    /**
-     * @brief Pi.
-     * Reference: https://numpy.org/doc/2.2/reference/constants.html#numpy.pi
-     */
-    inline constexpr double pi = std::numbers::pi_v<double>;
+/**
+ * @brief Pi.
+ * Reference: https://numpy.org/doc/2.2/reference/constants.html#numpy.pi
+ */
+inline constexpr double pi = std::numbers::pi_v<double>;
 
-    /**
-     * @brief Positive infinity (IEEE 754).
-     * Reference: https://numpy.org/doc/2.2/reference/constants.html#numpy.inf
-     */
-    inline constexpr double inf = std::numeric_limits<double>::infinity();
+/**
+ * @brief Positive infinity (IEEE 754).
+ * Reference: https://numpy.org/doc/2.2/reference/constants.html#numpy.inf
+ */
+inline constexpr double inf = std::numeric_limits<double>::infinity();
 
-    /**
-     * @brief Not a Number (quiet NaN, IEEE 754).
-     * Reference: https://numpy.org/doc/2.2/reference/constants.html#numpy.nan
-     */
-    inline constexpr double nan = std::numeric_limits<double>::quiet_NaN();
+/**
+ * @brief Not a Number (quiet NaN, IEEE 754).
+ * Reference: https://numpy.org/doc/2.2/reference/constants.html#numpy.nan
+ */
+inline constexpr double nan = std::numeric_limits<double>::quiet_NaN();
 
-    /**
-     * @brief Alias for None – use as `arr[None]` placeholder.
-     * NumPy: `numpy.newaxis is None` is True; we expose it as the
-     * canonical "add new axis" sentinel (mirrors Python `None`).
-     * Reference: https://numpy.org/doc/2.2/reference/constants.html#numpy.newaxis
-     */
-    inline constexpr std::nullopt_t newaxis = std::nullopt;
+/**
+ * @brief Alias for None – use as `arr[None]` placeholder.
+ * NumPy: `numpy.newaxis is None` is True; we expose it as the
+ * canonical "add new axis" sentinel (mirrors Python `None`).
+ * Reference: https://numpy.org/doc/2.2/reference/constants.html#numpy.newaxis
+ */
+inline constexpr std::nullopt_t newaxis = std::nullopt;
 
-    // Additional NumPy scalar aliases (often imported as constants)
-    // Note: avoid `NAN`/`INF` macro clash with <cmath> (they are macros).
-    // Also avoid NZERO/PZERO clash with <bits/xopen_lim.h> (defines NZERO as 20).
+// Additional NumPy scalar aliases (often imported as constants)
+// Note: avoid `NAN`/`INF` macro clash with <cmath> (they are macros).
+// Also avoid NZERO/PZERO clash with <bits/xopen_lim.h> (defines NZERO as 20).
 #ifdef NZERO
 #undef NZERO
 #endif
 #ifdef PZERO
 #undef PZERO
 #endif
-    inline constexpr double NINF = -std::numeric_limits<double>::infinity();
-    inline constexpr double PINF = std::numeric_limits<double>::infinity();
-    inline constexpr double NaN = std::numeric_limits<double>::quiet_NaN();
-    inline constexpr double Inf = std::numeric_limits<double>::infinity();
-    inline constexpr double PZERO = 0.0;
-    inline constexpr double NZERO = -0.0;
-  } // namespace constants
+inline constexpr double NINF = -std::numeric_limits<double>::infinity();
+inline constexpr double PINF = std::numeric_limits<double>::infinity();
+inline constexpr double NaN = std::numeric_limits<double>::quiet_NaN();
+inline constexpr double Inf = std::numeric_limits<double>::infinity();
+inline constexpr double PZERO = 0.0;
+inline constexpr double NZERO = -0.0;
+} // namespace constants
 
-  // Top-level mirrors – `np::pi`, `np::e`, etc. as in Python `numpy.pi`
-  inline constexpr double e = constants::e;
-  inline constexpr double euler_gamma = constants::euler_gamma;
-  inline constexpr double pi = constants::pi;
-  inline constexpr double inf = constants::inf;
-  inline constexpr double nan = constants::nan;
-  inline constexpr double NINF = constants::NINF;
-  inline constexpr double PINF = constants::PINF;
-  inline constexpr double PZERO = constants::PZERO;
-  inline constexpr double NZERO = constants::NZERO;
-  inline constexpr std::nullopt_t newaxis = constants::newaxis;
+// Top-level mirrors – `np::pi`, `np::e`, etc. as in Python `numpy.pi`
+inline constexpr double e = constants::e;
+inline constexpr double euler_gamma = constants::euler_gamma;
+inline constexpr double pi = constants::pi;
+inline constexpr double inf = constants::inf;
+inline constexpr double nan = constants::nan;
+inline constexpr double NINF = constants::NINF;
+inline constexpr double PINF = constants::PINF;
+inline constexpr double PZERO = constants::PZERO;
+inline constexpr double NZERO = constants::NZERO;
+inline constexpr std::nullopt_t newaxis = constants::newaxis;
 
 } // namespace np
 
