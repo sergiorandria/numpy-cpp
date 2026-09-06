@@ -192,8 +192,8 @@ namespace np::homotopy
       return {false, false, "One simply connected, other not"};
     if (scA && scB)
       return {true, false, "Simply connected + homology iso"};
-    int dimA = (int)bmsA.size() - 1;
-    int dimB = (int)bmsB.size() - 1;
+    int dimA = static_cast<int>(bmsA.size()) - 1;
+    int dimB = static_cast<int>(bmsB.size()) - 1;
     bool graphA = (dimA <= 1);
     bool graphB = (dimB <= 1);
     if (graphA && graphB)
@@ -263,16 +263,16 @@ namespace np::homotopy
     if (n <= 0)
       return {0, {}, true};
     auto hg = homology::homology_groups(bms);
-    if (n >= (int)hg.size())
+    if (n >= static_cast<int>(hg.size()))
     {
-      int dim = (int)bms.size() - 1;
+      int dim = static_cast<int>(bms.size()) - 1;
       if (dim <= 1 && n >= 2)
         return {0, {}, false};
       return {0, {}, false};
     }
     if (n == 1)
       return {hg[1].betti, hg[1].torsion, false};
-    int dim = (int)bms.size() - 1;
+    int dim = static_cast<int>(bms.size()) - 1;
     if (dim <= 1)
       return {0, {}, false};
     if (!is_simply_connected(bms))

@@ -143,7 +143,7 @@ namespace np::manifold
       {
         // map old vertex -> new vertex
         std::vector<int> vmap;
-        int nverts = K->simplices.empty() ? 0 : (int)K->simplices[0].size();
+        int nverts = K->simplices.empty() ? 0 : static_cast<int>(K->simplices[0].size());
         // Need vertex count: assume vertices are 0..nverts-1 contiguously
         // For general complexes vertices may be sparse; collect all vertex ids
         std::vector<int> all_verts;
@@ -195,7 +195,7 @@ namespace np::manifold
         num *= (n - i);
         den *= (k - i);
       }
-      return (int)(num / den);
+      return static_cast<int>(num / den);
     }
 
   } // namespace detail
@@ -297,7 +297,7 @@ namespace np::manifold
 
       bool orient = is_orientable();
       int n = dimension();
-      int top_betti = (n >= 0 && n < (int)hg.size()) ? hg[n].betti : 0;
+      int top_betti = (n >= 0 && n < static_cast<int>(hg.size())) ? hg[n].betti : 0;
       bool top_is_Z = (top_betti == 1);
       if (is_compact() && is_connected())
       {
@@ -323,7 +323,7 @@ namespace np::manifold
       for (int k = 0; k <= n; ++k)
       {
         int dr = de_rham(k).betti;
-        int sing = (k < (int)hg.size()) ? hg[k].betti : 0;
+        int sing = (k < static_cast<int>(hg.size())) ? hg[k].betti : 0;
         if (dr != sing)
         {
           r.ok = false;
@@ -350,8 +350,8 @@ namespace np::manifold
         bool pd_ok = true;
         for (int k = 0; k <= n; ++k)
         {
-          int bk = (k < (int)hg.size()) ? hg[k].betti : 0;
-          int bnk = (n - k >= 0 && n - k < (int)hg.size()) ? hg[n - k].betti : 0;
+          int bk = (k < static_cast<int>(hg.size())) ? hg[k].betti : 0;
+          int bnk = (n - k >= 0 && n - k < static_cast<int>(hg.size())) ? hg[n - k].betti : 0;
           if (bk != bnk)
           {
             pd_ok = false;
@@ -621,7 +621,7 @@ namespace np::manifold
     homology::HomologyGroup homology(int k) const override
     {
       auto h = homology();
-      if (k < 0 || k >= (int)h.size())
+      if (k < 0 || k >= static_cast<int>(h.size()))
         return {0, {}};
       return h[k];
     }
@@ -762,7 +762,7 @@ namespace np::manifold
     homology::HomologyGroup homology(int k) const override
     {
       auto h = homology();
-      if (k < 0 || k >= (int)h.size())
+      if (k < 0 || k >= static_cast<int>(h.size()))
         return {0, {}};
       return h[k];
     }
@@ -882,7 +882,7 @@ namespace np::manifold
     homology::HomologyGroup homology(int k) const override
     {
       auto h = homology();
-      if (k < 0 || k >= (int)h.size())
+      if (k < 0 || k >= static_cast<int>(h.size()))
         return {0, {}};
       return h[k];
     }
@@ -1000,7 +1000,7 @@ namespace np::manifold
         int df = f->dimension();
         std::vector<int> next(cur_dim + df + 1, 0);
         for (int i = 0; i <= cur_dim; ++i)
-          for (int j = 0; j <= df && j < (int)hf.size(); ++j)
+          for (int j = 0; j <= df && j < static_cast<int>(hf.size()); ++j)
             next[i + j] += cur_betti[i] * hf[j].betti;
         cur_betti = next;
         cur_dim += df;
@@ -1016,7 +1016,7 @@ namespace np::manifold
     homology::HomologyGroup homology(int k) const override
     {
       auto h = homology();
-      if (k < 0 || k >= (int)h.size())
+      if (k < 0 || k >= static_cast<int>(h.size()))
         return {0, {}};
       return h[k];
     }
@@ -1114,7 +1114,7 @@ namespace np::manifold
       for (auto& pp : parts)
       {
         auto h = pp->homology();
-        for (int k = 1; k <= D && k < (int)h.size(); ++k)
+        for (int k = 1; k <= D && k < static_cast<int>(h.size()); ++k)
         {
           out[k].betti += h[k].betti;
           // torsion adds
@@ -1127,7 +1127,7 @@ namespace np::manifold
     homology::HomologyGroup homology(int k) const override
     {
       auto h = homology();
-      if (k < 0 || k >= (int)h.size())
+      if (k < 0 || k >= static_cast<int>(h.size()))
         return {0, {}};
       return h[k];
     }
@@ -1201,7 +1201,7 @@ namespace np::manifold
         return ambient_dim;
       // Naive complete-intersection estimate; real Krull dim needs Gröbner.
       // Clamp at 0 and note that overdetermined systems may be empty.
-      int d = ambient_dim - (int)equations.size();
+      int d = ambient_dim - static_cast<int>(equations.size());
       return d < 0 ? 0 : d;
     }
     bool is_hypersurface() const
@@ -1210,7 +1210,7 @@ namespace np::manifold
     }
     bool is_complete_intersection() const
     {
-      return (int)equations.size() <= ambient_dim;
+      return static_cast<int>(equations.size()) <= ambient_dim;
     }
     bool is_smooth() const
     {

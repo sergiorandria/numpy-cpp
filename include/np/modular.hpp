@@ -333,8 +333,8 @@ namespace np::modular
     {
       auto Tp = hecke_operator(a, k, p);
       // eigenform condition: Tp(a) = a_p * a
-      bigint ap = (p < (int)a.shape[0]) ? a.at(static_cast<std::size_t>(p)) : bigint(0);
-      for (int n = 0; n < (int)a.shape[0]; ++n)
+      bigint ap = (p < static_cast<int>(a.shape[0])) ? a.at(static_cast<std::size_t>(p)) : bigint(0);
+      for (int n = 0; n < static_cast<int>(a.shape[0]); ++n)
       {
         bigint expected = ap * a.at(static_cast<std::size_t>(n));
         if (Tp.at(static_cast<std::size_t>(n)) != expected)
@@ -370,14 +370,14 @@ namespace np::modular
     }
     NP_NODISCARD bigint coeff(int n) const
     {
-      if (n < 0 || n >= (int)qexp.shape[0])
+      if (n < 0 || n >= static_cast<int>(qexp.shape[0]))
         return bigint(0);
       return qexp.at(static_cast<std::size_t>(n));
     }
     std::string to_string(int max_terms = 5) const
     {
       std::string s = "ModularForm k=" + std::to_string(weight) + " qexp: ";
-      for (int i = 0; i < std::min(max_terms, (int)qexp.shape[0]); ++i)
+      for (int i = 0; i < std::min(max_terms, static_cast<int>(qexp.shape[0])); ++i)
       {
         if (i)
           s += " + ";

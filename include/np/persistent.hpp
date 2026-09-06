@@ -41,7 +41,7 @@ namespace np::persistent
     double birth = 0.0;
     int dim() const
     {
-      return (int)verts.size() - 1;
+      return static_cast<int>(verts.size()) - 1;
     }
   };
 
@@ -94,7 +94,7 @@ namespace np::persistent
   NP_NODISCARD inline Barcode persistence_barcode(std::vector<FilteredSimplex> filt)
   {
     auto F = detail::sorted_filtration(std::move(filt));
-    int N = (int)F.size();
+    int N = static_cast<int>(F.size());
     if (N == 0)
       return {};
 
@@ -223,7 +223,7 @@ namespace np::persistent
   NP_NODISCARD inline std::vector<FilteredSimplex>
   vietoris_rips_filtration(const std::vector<std::vector<double>>& points, double max_eps)
   {
-    int n = (int)points.size();
+    int n = static_cast<int>(points.size());
     if (n == 0)
       return {};
     std::vector<FilteredSimplex> filt;

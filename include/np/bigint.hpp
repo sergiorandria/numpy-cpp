@@ -283,7 +283,7 @@ namespace np
     inline std::string add_abs_str(const std::string& a, const std::string& b)
     {
       std::string res;
-      int i = (int)a.size() - 1, j = (int)b.size() - 1, carry = 0;
+      int i = static_cast<int>(a.size()) - 1, j = static_cast<int>(b.size()) - 1, carry = 0;
       while (i >= 0 || j >= 0 || carry)
       {
         int sum = carry;
@@ -298,7 +298,7 @@ namespace np
     inline std::string sub_abs_str(const std::string& a, const std::string& b) // a>=b, both positive
     {
       std::string res;
-      int i = (int)a.size() - 1, j = (int)b.size() - 1, borrow = 0;
+      int i = static_cast<int>(a.size()) - 1, j = static_cast<int>(b.size()) - 1, borrow = 0;
       while (i >= 0)
       {
         int da = a[i--] - '0' - borrow;
@@ -320,10 +320,10 @@ namespace np
     {
       if (a == "0" || b == "0") return "0";
       std::vector<int> r(a.size() + b.size(), 0);
-      for (int i = (int)a.size() - 1; i >= 0; --i)
-        for (int j = (int)b.size() - 1; j >= 0; --j)
+      for (int i = static_cast<int>(a.size()) - 1; i >= 0; --i)
+        for (int j = static_cast<int>(b.size()) - 1; j >= 0; --j)
           r[i + j + 1] += (a[i] - '0') * (b[j] - '0');
-      for (int k = (int)r.size() - 1; k > 0; --k)
+      for (int k = static_cast<int>(r.size()) - 1; k > 0; --k)
       {
         r[k - 1] += r[k] / 10;
         r[k] %= 10;

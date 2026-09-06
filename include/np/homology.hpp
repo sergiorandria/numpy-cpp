@@ -158,10 +158,10 @@ namespace np::homology
 
     NP_NODISCARD inline bigint bareiss_determinant(std::vector<std::vector<bigint>> M)
     {
-      int n = (int)M.size();
+      int n = static_cast<int>(M.size());
       if (n == 0)
         return bigint(1);
-      if ((int)M[0].size() != n)
+      if (static_cast<int>(M[0].size()) != n)
         throw std::invalid_argument("bareiss: not square");
       if (n == 1)
         return M[0][0];
@@ -203,10 +203,10 @@ namespace np::homology
 
     NP_NODISCARD inline int bareiss_rank(std::vector<std::vector<bigint>> M)
     {
-      int m = (int)M.size();
+      int m = static_cast<int>(M.size());
       if (m == 0)
         return 0;
-      int n = (int)M[0].size();
+      int n = static_cast<int>(M[0].size());
       if (n == 0)
         return 0;
       int rank = 0;
@@ -688,7 +688,7 @@ namespace np::homology
     {
       int max_dim = 0;
       for (auto& s : simplices)
-        max_dim = std::max(max_dim, (int)s.size() - 1);
+        max_dim = std::max(max_dim, static_cast<int>(s.size()) - 1);
       std::vector<std::vector<std::vector<int>>> lvl(max_dim + 1);
       for (auto& s : simplices)
         lvl[s.size() - 1].push_back(s);
@@ -745,7 +745,7 @@ namespace np::homology
   NP_NODISCARD inline int betti(const SimplicialComplex& K, int k)
   {
     auto b = betti_numbers(K);
-    if (k < 0 || k >= (int)b.size())
+    if (k < 0 || k >= static_cast<int>(b.size()))
       return 0;
     return b[k];
   }

@@ -1,6 +1,7 @@
 /**
  * @file quantum.hpp
- * @brief Quantum — StateVector, isolated VM, circuit ops (H/X/Y/Z/S/T/RX/RY/RZ/CNOT/CZ/SWAP/Toffoli), measurement.
+ * @brief Quantum — StateVector, isolated VM, circuit ops
+ * (H/X/Y/Z/S/T/RX/RY/RZ/CNOT/CZ/SWAP/Toffoli), measurement.
  *
  * Provides `np::quantum` with isolated qubit simulation:
  *   - `Qubit`/`StateVector` (2^n amps, ndarray<c128>, prob, normalize, measure)
@@ -27,8 +28,10 @@
 #include "linalg.hpp"
 #include "ndarray.hpp"
 #include <algorithm>
+#include <boost/math/tools/complex.hpp>
 #include <complex>
 #include <concepts>
+#include <cstdint>
 #include <functional>
 #include <memory>
 #include <mutex>
@@ -37,30 +40,74 @@
 #include <ranges>
 #include <shared_mutex>
 #include <span>
+#include <type_traits>
 #include <variant>
 #include <vector>
 
 namespace np::quantum
 {
 
+#ifndef __NP_C64_DTYPE_STD
   using c64 = std::complex<float>;
+#endif // __NP_C64_DTYPE_STD
+#ifndef __NP_C128_DTYPE_STD
   using c128 = std::complex<double>;
+#endif // __NP_C128_DTYPE_STD
+
+#define __NP_QUBIT_COUNT_MAX 20
+  template <typename T>
+  concept QubitCount =
+      std::is_integral_v<T> && requires(T n) { n >= 1 && n <= __NP_QUBIT_COUNT_MAX; };
 
   template <typename T>
-  concept QubitCount = std::is_integral_v<T> && requires(T n) { n >= 1 && n <= 20; };
+  concept ComplexType = boost::math::tools::is_complex_type<T>::value;
 
-  // ── StateVector ────────────────────────────────────────────────────────
-  struct StateVector
+  template <class T>
+    requires ComplexType<T>
+  class IStateVector
   {
-    ndarray<c128> amps; // 2^n
+  protected:
+    ndarray<T> amps;
 
-    StateVector() = default;
-    explicit StateVector(int n_qubits) : amps(std::vector<int>{1 << n_qubits})
+  public:
+    IStateVector() = default;
+
+    explicit IStateVector(int n_qubits) : amps(std::vector<int>{1 << n_qubits})
     {
-      amps[0] = c128(1, 0);
     }
-    explicit StateVector(ndarray<c128> a) : amps(std::move(a))
+  };
+
+#ifndef __NP_MEMORY_GUARD_BYTES
+#define __NP_MEMORY_GUARD_BYTES
+
+  struct _GuardBytes
+  {
+    uint32_t bytes = 0xDEADBEEF;
+  };
+
+  // Check if there was a tamper before
+  // move operation.
+  template <typename T>
+  auto is_corrupted(T&& value) -> bool
+  {
+    return value.bytes != 0xDEADBEEF;
+  }
+
+#endif // __NP_MEMORY_GUARD_BYTES
+
+  // StateVector
+  class StateVector : public IStateVector<c128>
+  {
+    StateVector() = default;
+    explicit StateVector(int n_qubits)
     {
+      this->amps = ndarray<c128>(std::vector<int>{1 << n_qubits});
+      this->amps[0] = c128(1, 0);
+    }
+
+    explicit StateVector(ndarray<c128>&& a)
+    {
+      this->amps = std::move(std::forward<ndarray<c128>>(a));
     }
 
     NP_NODISCARD int n_qubits() const
@@ -168,7 +215,8 @@ namespace np::quantum
       gates = o.gates;
       return *this;
     }
-    QuantumCircuit(QuantumCircuit&& o) noexcept : n_qubits(o.n_qubits), gates(std::move(o.gates))
+    QuantumCircuit(QuantumCircuit&& o) noexcept
+        : n_qubits(o.n_qubits), gates(std::move(o.gates))
     {
     }
     QuantumCircuit& operator=(QuantumCircuit&& o) noexcept
@@ -204,11 +252,14 @@ namespace np::quantum
       Builder& h(int q)
       {
         Gate1Q g;
-        g.mat = [] {
+        g.mat = []
+        {
           ndarray<c128> m(std::vector<int>{2, 2});
           double inv = 1.0 / std::sqrt(2);
-          m(0, 0) = c128(inv, 0); m(0, 1) = c128(inv, 0);
-          m(1, 0) = c128(inv, 0); m(1, 1) = c128(-inv, 0);
+          m(0, 0) = c128(inv, 0);
+          m(0, 1) = c128(inv, 0);
+          m(1, 0) = c128(inv, 0);
+          m(1, 1) = c128(-inv, 0);
           return m;
         }();
         g.name = "H";
@@ -219,10 +270,13 @@ namespace np::quantum
       Builder& x(int q)
       {
         Gate1Q g;
-        g.mat = [] {
+        g.mat = []
+        {
           ndarray<c128> m(std::vector<int>{2, 2});
-          m(0, 0) = c128(0, 0); m(0, 1) = c128(1, 0);
-          m(1, 0) = c128(1, 0); m(1, 1) = c128(0, 0);
+          m(0, 0) = c128(0, 0);
+          m(0, 1) = c128(1, 0);
+          m(1, 0) = c128(1, 0);
+          m(1, 1) = c128(0, 0);
           return m;
         }();
         g.name = "X";
@@ -233,10 +287,13 @@ namespace np::quantum
       Builder& rx(int q, double theta)
       {
         Gate1Q g;
-        g.mat = [theta] {
+        g.mat = [theta]
+        {
           ndarray<c128> m(std::vector<int>{2, 2});
-          m(0, 0) = c128(std::cos(theta / 2), 0); m(0, 1) = c128(0, -std::sin(theta / 2));
-          m(1, 0) = c128(0, -std::sin(theta / 2)); m(1, 1) = c128(std::cos(theta / 2), 0);
+          m(0, 0) = c128(std::cos(theta / 2), 0);
+          m(0, 1) = c128(0, -std::sin(theta / 2));
+          m(1, 0) = c128(0, -std::sin(theta / 2));
+          m(1, 1) = c128(std::cos(theta / 2), 0);
           return m;
         }();
         g.name = "RX";
@@ -247,15 +304,21 @@ namespace np::quantum
       Builder& cnot(int c, int t)
       {
         Gate2Q g;
-        g.mat = [] {
+        g.mat = []
+        {
           ndarray<c128> m(std::vector<int>{4, 4});
           for (int i = 0; i < 4; ++i)
             for (int j = 0; j < 4; ++j)
               m(i, j) = c128(0, 0);
-          m(0, 0) = c128(1, 0); m(1, 1) = c128(1, 0); m(2, 3) = c128(1, 0); m(3, 2) = c128(1, 0);
+          m(0, 0) = c128(1, 0);
+          m(1, 1) = c128(1, 0);
+          m(2, 3) = c128(1, 0);
+          m(3, 2) = c128(1, 0);
           return m;
         }();
-        g.q0 = c; g.q1 = t; g.name = "CNOT";
+        g.q0 = c;
+        g.q1 = t;
+        g.name = "CNOT";
         gates_.push_back(std::move(g));
         return *this;
       }
@@ -278,7 +341,8 @@ namespace np::quantum
       if (gates.empty())
         return;
       std::visit(
-          [&](auto&& g) {
+          [&](auto&& g)
+          {
             using T = std::decay_t<decltype(g)>;
             if constexpr (std::is_same_v<T, Gate1Q>)
             {
@@ -287,9 +351,11 @@ namespace np::quantum
                 c128 a0 = static_cast<c128>(sv.amps[0]);
                 c128 a1 = sv.amps.size() > 1 ? static_cast<c128>(sv.amps[1]) : c128(0, 0);
                 double inv = 1.0 / std::sqrt(2);
-                sv.amps[0] = c128((a0.real() + a1.real()) * inv, (a0.imag() + a1.imag()) * inv);
+                sv.amps[0] =
+                    c128((a0.real() + a1.real()) * inv, (a0.imag() + a1.imag()) * inv);
                 if (sv.amps.size() > 1)
-                  sv.amps[1] = c128((a0.real() - a1.real()) * inv, (a0.imag() - a1.imag()) * inv);
+                  sv.amps[1] =
+                      c128((a0.real() - a1.real()) * inv, (a0.imag() - a1.imag()) * inv);
               }
             }
           },
@@ -306,7 +372,8 @@ namespace np::quantum
     std::jthread worker;
 
     IsolatedQuantumVM() = default;
-    IsolatedQuantumVM(StateVector s, QuantumCircuit c) : state(std::move(s)), circ(std::move(c))
+    IsolatedQuantumVM(StateVector s, QuantumCircuit c)
+        : state(std::move(s)), circ(std::move(c))
     {
     }
     IsolatedQuantumVM(const IsolatedQuantumVM&) = delete;

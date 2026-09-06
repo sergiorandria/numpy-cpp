@@ -101,8 +101,8 @@ namespace np::spectral
   {
     auto hb = homology::homology_groups(base);
     auto hf = homology::homology_groups(fiber);
-    int pb = (int)hb.size() - 1;
-    int qf = (int)hf.size() - 1;
+    int pb = static_cast<int>(hb.size()) - 1;
+    int qf = static_cast<int>(hf.size()) - 1;
     int P = pb, Q = qf;
     SpectralSequencePage pg;
     pg.r = 2;
@@ -159,7 +159,7 @@ namespace np::spectral
       pg3.has_torsion.assign(
           pg2.betti.size(), std::vector<bool>(pg2.betti[0].size(), false));
       pg3.betti[0][0] = 1;
-      if ((int)pg3.betti.size() > 2 && (int)pg3.betti[2].size() > 1)
+      if (static_cast<int>(pg3.betti.size()) > 2 && static_cast<int>(pg3.betti[2].size()) > 1)
         pg3.betti[2][1] = 1;
       ss.pages.push_back(pg3);
       ss.collapses = true;
@@ -184,7 +184,7 @@ namespace np::spectral
     // Atiyah–Hirzebruch: E2^{p,q}=H^p(B; K^q(pt)) ⇒ K^{p+q}(B)
     // For K-theory, K^q(pt)=Z for q even, 0 for q odd (Bott periodicity)
     auto hb = homology::betti_numbers(base);
-    int P = (int)hb.size() - 1;
+    int P = static_cast<int>(hb.size()) - 1;
     int Q = 4; // truncated periodic
     SpectralSequence ss;
     ss.bundle_name = "AHSS(" + theory + ") for B";
@@ -214,10 +214,10 @@ namespace np::spectral
     if (ss.pages.empty())
       return {};
     auto pg = ss.pages.back();
-    int P = (int)pg.betti.size() - 1;
+    int P = static_cast<int>(pg.betti.size()) - 1;
     if (P < 0)
       return {};
-    int Q = (int)pg.betti[0].size() - 1;
+    int Q = static_cast<int>(pg.betti[0].size()) - 1;
     std::vector<int> tot(P + Q + 1, 0);
     for (int p = 0; p <= P; ++p)
       for (int q = 0; q <= Q; ++q)
