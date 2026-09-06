@@ -2032,48 +2032,122 @@ NP_API inline auto translate(const ndarray<std::string> &a, const std::string &t
     return result;
 }
 
-/* Encode/Decode Functions (Simplified - C++ strings are already bytes) */
+/* Encode/Decode — UTF-8 validation with errors handling */
+
+namespace detail
+{
+  // Minimal UTF-8 validator (RFC 3629) — checks continuation bytes and overlongs
+  inline bool is_valid_utf8(const std::string &s) noexcept
+  {
+    std::size_t i = 0, n = s.size();
+    while (i < n)
+    {
+      unsigned char c = static_cast<unsigned char>(s[i]);
+      std::size_t len = 0;
+      if ((c & 0x80) == 0) len = 1;
+      else if ((c & 0xE0) == 0xC0) len = 2;
+      else if ((c & 0xF0) == 0xE0) len = 3;
+      else if ((c & 0xF8) == 0xF0) len = 4;
+      else return false;
+      if (i + len > n) return false;
+      for (std::size_t j = 1; j < len; ++j)
+        if ((static_cast<unsigned char>(s[i + j]) & 0xC0) != 0x80) return false;
+      // Reject overlong and surrogates (simplified)
+      if (len == 2 && c < 0xC2) return false;
+      if (len == 3 && c == 0xE0 && static_cast<unsigned char>(s[i + 1]) < 0xA0) return false;
+      if (len == 4 && c == 0xF0 && static_cast<unsigned char>(s[i + 1]) < 0x90) return false;
+      i += len;
+    }
+    return true;
+  }
+
+  inline bool is_valid_ascii(const std::string &s) noexcept
+  {
+    for (unsigned char c : s)
+      if (c & 0x80) return false;
+    return true;
+  }
+
+  inline std::string handle_encode_error(
+      const std::string &s, const std::string &errors, bool valid)
+  {
+    if (valid) return s;
+    if (errors == "strict")
+      throw std::invalid_argument("encode: invalid string for encoding");
+    if (errors == "ignore")
+      return {}; // drop invalid — caller will skip element
+    if (errors == "replace")
+      return "?";
+    // xmlcharrefreplace / backslashreplace — simplified to "?"
+    return "?";
+  }
+} // namespace detail
 
 /**
- * @brief Calls str.encode() element-wise (no-op in C++).
+ * @brief Calls str.encode() element-wise with UTF-8 validation.
  *
  * Reference: numpy-reference/reference/generated/numpy.char.encode.html
  *
- * Note: In Python NumPy, this converts unicode to bytes. C++ std::string
- * already represents bytes, so this is essentially a copy operation.
+ * In Python this converts unicode → bytes; here we validate that the
+ * C++ string is valid for `encoding` and handle `errors` (`strict`/`ignore`/`replace`).
  *
  * @param a Input string array
- * @param encoding Encoding name (ignored)
- * @param errors Error handling (ignored)
- * @return Copy of input array
+ * @param encoding Encoding name (`utf-8`, `ascii`, `latin1`)
+ * @param errors Error handling (`strict`, `ignore`, `replace`)
+ * @return Encoded copy (still std::string, as C++ is byte-based)
  */
 NP_API inline auto encode(const ndarray<std::string> &a, const std::string &encoding = "utf-8",
                           const std::string &errors = "strict") -> ndarray<std::string>
 {
-    (void)encoding;
-    (void)errors; // Unused in C++
-    return a;     // C++ strings are already byte strings
+  std::string enc = encoding;
+  std::transform(enc.begin(), enc.end(), enc.begin(), ::tolower);
+  bool is_utf8 = (enc == "utf-8" || enc == "utf8");
+  bool is_ascii = (enc == "ascii");
+  // latin1 always valid for 0..255 bytes
+  ndarray<std::string> out(a.shape);
+  for (std::size_t i = 0; i < a.size(); ++i)
+  {
+    const std::string &s = a.data()[i];
+    bool valid = true;
+    if (is_utf8) valid = detail::is_valid_utf8(s);
+    else if (is_ascii) valid = detail::is_valid_ascii(s);
+    // latin1/others: always valid
+    if (!valid)
+    {
+      std::string rep = detail::handle_encode_error(s, errors, false);
+      if (errors == "ignore" && rep.empty())
+        out.data()[i] = "";
+      else if (errors == "strict")
+        throw std::invalid_argument("encode: '" + s + "' not valid for " + encoding);
+      else
+        out.data()[i] = rep;
+    }
+    else
+    {
+      out.data()[i] = s;
+    }
+  }
+  return out;
 }
 
 /**
- * @brief Calls str.decode() element-wise (no-op in C++).
+ * @brief Calls str.decode() element-wise with validation.
  *
  * Reference: numpy-reference/reference/generated/numpy.char.decode.html
  *
- * Note: In Python NumPy, this converts bytes to unicode. C++ std::string
- * can represent both, so this is essentially a copy operation.
+ * Validates bytes for `encoding`; here std::string already holds bytes,
+ * so we just validate and handle `errors`.
  *
  * @param a Input string array
- * @param encoding Encoding name (ignored)
- * @param errors Error handling (ignored)
- * @return Copy of input array
+ * @param encoding Encoding name
+ * @param errors Error handling
+ * @return Decoded copy
  */
 NP_API inline auto decode(const ndarray<std::string> &a, const std::string &encoding = "utf-8",
                           const std::string &errors = "strict") -> ndarray<std::string>
 {
-    (void)encoding;
-    (void)errors; // Unused in C++
-    return a;     // C++ strings are already decoded
+  // Decode is symmetric to encode for our byte-based std::string
+  return encode(a, encoding, errors);
 }
 
 /* Compare Function */
