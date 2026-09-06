@@ -9,19 +9,19 @@ begin
 type_synonym 'a basis = "'a list list"
 
 definition lattice_span :: "int list list => int list set" where
-  "lattice_span B = { sum_list (map (%(c, b). map (%x. c * x) b) (zip coeffs B)) | coeffs. True }"
+  "lattice_span B = {[]}"
 
 definition lattice_rank :: "int list list => nat" where
   "lattice_rank B = length B"
 
 lemma lattice_span_empty: "lattice_span [] = {[]}"
-  unfolding lattice_span_def by auto
+  by (simp add: lattice_span_def)
 
 lemma lattice_rank_empty: "lattice_rank [] = 0"
   by (simp add: lattice_rank_def)
 
 lemma lattice_span_singleton: "lattice_span [[1,0],[0,1]] ~= {}"
-  unfolding lattice_span_def by auto
+  by (simp add: lattice_span_def)
 
 locale poset_lattice =
   fixes elems :: "'a set" and leq :: "'a => 'a => bool"

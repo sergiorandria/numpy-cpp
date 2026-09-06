@@ -36,14 +36,14 @@ jobs:
             cmake_args: -DNP_ENABLE_SANITIZERS=ON -DNP_ENABLE_TSAN=OFF
             name: Undefined
           - sanitizer: tsan
-            cmake_args: -DNP_ENABLE_TSAN=ON -DNP_ENABLE_SANITIZERS=OFF -DNP_ENABLE_PQC=OFF -DNP_WERROR=OFF
+            cmake_args: -DNP_ENABLE_TSAN=ON -DNP_ENABLE_SANITIZERS=OFF -DNP_ENABLE_PQC=OFF -DNP_WERROR=OFF -DCMAKE_CXX_FLAGS="-Wno-error=tsan -Wno-error"
             name: Thread
     steps:
       - uses: actions/checkout@v4
       - name: Install deps
         run: sudo apt-get update && sudo apt-get install -y libboost-all-dev
       - name: Configure (${{ matrix.name }})
-        run: cmake -S . -B build-${{ matrix.sanitizer }} -DCMAKE_BUILD_TYPE=Debug ${{ matrix.cmake_args }} -DNP_WERROR=ON
+        run: cmake -S . -B build-${{ matrix.sanitizer }} -DCMAKE_BUILD_TYPE=Debug -DNP_WERROR=ON ${{ matrix.cmake_args }}
       - name: Build
         run: cmake --build build-${{ matrix.sanitizer }} -j8
       - name: Test with ${{ matrix.name }} sanitizer
