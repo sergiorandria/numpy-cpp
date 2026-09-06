@@ -1513,10 +1513,14 @@ template <typename T> inline void fma_vectorized(const T *b, T a, T *out, std::s
     }
 }
 
-// ── Transcendental (SLEEF-accelerated, scalar fallback) ───────────────
+// Transcendental (SLEEF-accelerated, scalar fallback)
 template <typename T> inline void sin_vectorized(const T *in, T *out, std::size_t n)
-    if (!tune::should_use_simd(n)) { for (std::size_t i=0;i<n;++i) out[i]=std::sin(in[i]); return; }
 {
+    if (!tune::should_use_simd(n))
+    {
+        for (std::size_t i = 0; i < n; ++i) out[i] = std::sin(in[i]);
+        return;
+    }
     if constexpr (std::is_same_v<T, double>)
     {
 #if defined(NP_HAS_SLEEF) && defined(NP_SIMD_AVX)
@@ -1574,8 +1578,12 @@ template <typename T> inline void sin_vectorized(const T *in, T *out, std::size_
     }
 }
 template <typename T> inline void cos_vectorized(const T *in, T *out, std::size_t n)
-    if (!tune::should_use_simd(n)) { for (std::size_t i=0;i<n;++i) out[i]=std::cos(in[i]); return; }
 {
+    if (!tune::should_use_simd(n))
+    {
+        for (std::size_t i = 0; i < n; ++i) out[i] = std::cos(in[i]);
+        return;
+    }
     if constexpr (std::is_same_v<T, double>)
     {
 #if defined(NP_HAS_SLEEF) && defined(NP_SIMD_AVX)
@@ -1632,9 +1640,13 @@ template <typename T> inline void cos_vectorized(const T *in, T *out, std::size_
             out[i] = std::cos(in[i]);
     }
 }
-    if (!tune::should_use_simd(n)) { for (std::size_t i=0;i<n;++i) out[i]=std::exp(in[i]); return; }
 template <typename T> inline void exp_vectorized(const T *in, T *out, std::size_t n)
 {
+    if (!tune::should_use_simd(n))
+    {
+        for (std::size_t i = 0; i < n; ++i) out[i] = std::exp(in[i]);
+        return;
+    }
     if constexpr (std::is_same_v<T, double>)
     {
 #if defined(NP_HAS_SLEEF) && defined(NP_SIMD_AVX)
@@ -1690,10 +1702,14 @@ template <typename T> inline void exp_vectorized(const T *in, T *out, std::size_
         for (std::size_t i = 0; i < n; ++i)
             out[i] = std::exp(in[i]);
     }
-    if (!tune::should_use_simd(n)) { for (std::size_t i=0;i<n;++i) out[i]=std::log(in[i]); return; }
 }
 template <typename T> inline void log_vectorized(const T *in, T *out, std::size_t n)
 {
+    if (!tune::should_use_simd(n))
+    {
+        for (std::size_t i = 0; i < n; ++i) out[i] = std::log(in[i]);
+        return;
+    }
     if constexpr (std::is_same_v<T, double>)
     {
 #if defined(NP_HAS_SLEEF) && defined(NP_SIMD_AVX)
