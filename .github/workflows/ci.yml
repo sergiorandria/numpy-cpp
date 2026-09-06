@@ -85,7 +85,7 @@ jobs:
             ISABIN=$(find / -name isabelle -type f 2>/dev/null | head -n1)
             if [ -n "$ISABIN" ]; then export PATH="$(dirname "$ISABIN"):$PATH"; fi
           fi
-          isabelle build -D isabelle -v
+          isabelle build -D isabelle -o quick_and_dirty -v
 
   benchmark:
     runs-on: ubuntu-latest
