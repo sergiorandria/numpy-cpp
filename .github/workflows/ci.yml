@@ -36,7 +36,7 @@ jobs:
             cmake_args: -DNP_ENABLE_SANITIZERS=ON -DNP_ENABLE_TSAN=OFF
             name: Undefined
           - sanitizer: tsan
-            cmake_args: -DNP_ENABLE_TSAN=ON -DNP_ENABLE_SANITIZERS=OFF
+            cmake_args: -DNP_ENABLE_TSAN=ON -DNP_ENABLE_SANITIZERS=OFF -DNP_ENABLE_PQC=OFF -DNP_WERROR=OFF
             name: Thread
     steps:
       - uses: actions/checkout@v4

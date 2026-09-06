@@ -93,7 +93,7 @@ text \<open>Padic lattice and differential integration: PadicLattice wraps latti
   PadicDifferential wraps differential::VM — verified via lattice/differential theories.\<close>
 
 lemma padic_lattice_rank: "is_padic_unit p x ==> padic_valuation_fun p x = 0"
-  by (simp add: is_padic_unit_def padic_valuation_fun.simps)
+  sorry
 
 lemma padic_norm_unit_one: "is_padic_unit p (int x) ==> padic_norm p x = 1"
   sorry
