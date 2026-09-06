@@ -37,6 +37,11 @@
 #include "bigint.hpp"
 #include "ndarray.hpp"
 
+// Smith normal form tuning (macros, no magic numbers in logic)
+#define NP_HOMOLOGY_SNF_COMB_LIMIT 100000
+#define NP_HOMOLOGY_SNF_MINORS_LIMIT 2000000
+#define NP_HOMOLOGY_SNF_BINOM_CAP 5000000LL
+
 namespace np::homology
 {
 
@@ -259,7 +264,7 @@ NP_NODISCARD inline long long binom_ll(int n, int k)
     for (int i = 0; i < k; ++i)
     {
         res = res * (n - i) / (i + 1);
-        if (res > (long long)5e6)
+        if (res > NP_HOMOLOGY_SNF_BINOM_CAP)
             return res; // cap
     }
     return res;
@@ -378,19 +383,19 @@ NP_NODISCARD inline std::vector<bigint> smith_normal_form(const ndarray<int> &A)
     {
         long long cr = detail::binom_ll(m, k);
         long long cc = detail::binom_ll(n, k);
-        if (cr > 100000 || cc > 100000)
+        if (cr > NP_HOMOLOGY_SNF_COMB_LIMIT || cc > NP_HOMOLOGY_SNF_COMB_LIMIT)
         {
             too_large = true;
             break;
         }
         long long tot = cr * cc;
-        if (tot > 2000000)
+        if (tot > NP_HOMOLOGY_SNF_MINORS_LIMIT)
         {
             too_large = true;
             break;
         }
         total_est += tot;
-        if (total_est > 2000000)
+        if (total_est > NP_HOMOLOGY_SNF_MINORS_LIMIT)
         {
             too_large = true;
             break;
@@ -453,19 +458,19 @@ NP_NODISCARD inline std::vector<bigint> smith_normal_form(const ndarray<bigint> 
     {
         long long cr = detail::binom_ll(m, k);
         long long cc = detail::binom_ll(n, k);
-        if (cr > 100000 || cc > 100000)
+        if (cr > NP_HOMOLOGY_SNF_COMB_LIMIT || cc > NP_HOMOLOGY_SNF_COMB_LIMIT)
         {
             too_large = true;
             break;
         }
         long long tot = cr * cc;
-        if (tot > 2000000)
+        if (tot > NP_HOMOLOGY_SNF_MINORS_LIMIT)
         {
             too_large = true;
             break;
         }
         total_est += tot;
-        if (total_est > 2000000)
+        if (total_est > NP_HOMOLOGY_SNF_MINORS_LIMIT)
         {
             too_large = true;
             break;
