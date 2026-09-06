@@ -30,10 +30,10 @@ lemma dual_add_dval: "dval (dual_add a b) = dval a + dval b"
   by (simp add: dual_add_def)
 
 lemma dual_add_comm: "dual_add a b = dual_add b a"
-  by (simp add: dual_add_def) (auto simp: add.commute)
+  by (simp add: dual_add_def add.commute)
 
 lemma dual_add_assoc: "dual_add (dual_add a b) c = dual_add a (dual_add b c)"
-  by (simp add: dual_add_def) auto
+  by (simp add: dual_add_def)
 
 lemma dual_mul_val: "val (dual_mul a b) = val a * val b"
   by (simp add: dual_mul_def)
@@ -45,7 +45,7 @@ lemma dual_mul_comm: "dual_mul a b = dual_mul b a"
   unfolding dual_mul_def by (simp add: mult.commute add.commute)
 
 lemma dual_mul_assoc: "val (dual_mul (dual_mul a b) c) = val (dual_mul a (dual_mul b c))"
-  by (simp add: dual_mul_def) (simp add: mult.assoc)
+  by (simp add: dual_mul_def mult.assoc)
 
 lemma dual_mul_constexpr:
   fixes a :: "real dual" and b :: "real dual"

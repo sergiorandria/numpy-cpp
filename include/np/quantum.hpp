@@ -28,7 +28,6 @@
 #include "linalg.hpp"
 #include "ndarray.hpp"
 #include <algorithm>
-#include <boost/math/tools/complex.hpp>
 #include <complex>
 #include <concepts>
 #include <cstdint>
@@ -44,6 +43,11 @@
 #include <variant>
 #include <vector>
 
+#if __has_include(<boost/math/tools/complex.hpp>)
+#include <boost/math/tools/complex.hpp>
+#define NP_HAS_BOOST_COMPLEX 1
+#endif
+
 namespace np::quantum
 {
 
@@ -58,8 +62,24 @@ using c128 = std::complex<double>;
 template <typename T>
 concept QubitCount = std::is_integral_v<T> && requires(T n) { n >= 1 && n <= __NP_QUBIT_COUNT_MAX; };
 
+namespace detail
+{
+template <typename T> struct is_complex : std::false_type
+{
+};
+template <typename T> struct is_complex<std::complex<T>> : std::true_type
+{
+};
+template <typename T> inline constexpr bool is_complex_v = is_complex<std::remove_cv_t<T>>::value;
+} // namespace detail
+
+#if defined(NP_HAS_BOOST_COMPLEX)
 template <typename T>
-concept ComplexType = boost::math::tools::is_complex_type<T>::value;
+concept ComplexType = boost::math::tools::is_complex_type<T>::value || detail::is_complex_v<T>;
+#else
+template <typename T>
+concept ComplexType = detail::is_complex_v<T>;
+#endif
 
 template <class T>
     requires ComplexType<T>
