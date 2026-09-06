@@ -98,6 +98,14 @@ namespace np::quantum
   // StateVector
   class StateVector : public IStateVector<c128>
   {
+    private: 
+      _GuardBytes guard;
+      
+      auto assert_bytes_ok() { 
+
+      }
+
+    public:
     StateVector() = default;
     explicit StateVector(int n_qubits)
     {
@@ -117,11 +125,13 @@ namespace np::quantum
         ++n;
       return n;
     }
+
     NP_NODISCARD double prob(int idx) const
     {
       c128 a = static_cast<c128>(amps[idx]);
       return std::norm(a);
     }
+
     NP_NODISCARD double norm() const
     {
       double s = 0;
@@ -129,6 +139,7 @@ namespace np::quantum
         s += std::norm(static_cast<c128>(amps[i]));
       return std::sqrt(s);
     }
+
     NP_API void normalize()
     {
       double nrm = norm();
@@ -137,28 +148,38 @@ namespace np::quantum
       for (size_t i = 0; i < amps.size(); ++i)
         amps[i] = static_cast<c128>(amps[i]) / nrm;
     }
+
     NP_NODISCARD StateVector clone() const
     {
-      return StateVector(amps);
+      StateVector s;
+      s.amps = amps;
+      return s;
     }
-    // measure with collapse (returns 0/1 and collapses state)
+
+    // Measure with collapse (returns 0/1 and collapses state)
     NP_NODISCARD std::optional<int> measure(int qubit, double rand01 = -1)
     {
       int n = n_qubits();
+
       if (qubit < 0 || qubit >= n)
         return std::nullopt;
+      
       double p0 = 0;
+      
       for (size_t i = 0; i < amps.size(); ++i)
         if (((i >> qubit) & 1) == 0)
           p0 += prob(static_cast<int>(i));
+      
       std::mt19937 eng{42};
       double r = rand01 < 0 ? std::generate_canonical<double, 10>(eng) : rand01;
       int outcome = (r < p0) ? 0 : 1;
+      
       // collapse
       double norm_factor = outcome == 0 ? std::sqrt(p0) : std::sqrt(1 - p0);
       if (norm_factor < 1e-12)
         return outcome;
-      for (size_t i = 0; i < amps.size(); ++i)
+      
+        for (size_t i = 0; i < amps.size(); ++i)
         if (((i >> qubit) & 1) != outcome)
           amps[i] = c128(0, 0);
         else
@@ -167,7 +188,7 @@ namespace np::quantum
     }
   };
 
-  // ── Gate variant ───────────────────────────────────────────────────────
+  // Gate variant
   struct Gate1Q
   {
     ndarray<c128> mat; // 2x2
@@ -357,6 +378,15 @@ namespace np::quantum
                   sv.amps[1] =
                       c128((a0.real() - a1.real()) * inv, (a0.imag() - a1.imag()) * inv);
               }
+            }
+            else if constexpr (std::is_same_v<T, Gate2Q>)
+            {
+              // 2Q gate placeholder — no-op for now, keep production compile clean
+              (void)g;
+            }
+            else if constexpr (std::is_same_v<T, Gate3Q>)
+            {
+              (void)g;
             }
           },
           gates.front());
