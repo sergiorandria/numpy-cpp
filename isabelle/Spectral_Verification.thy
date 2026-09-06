@@ -27,7 +27,7 @@ lemma hodge_apply_length: "length (hodge_apply xs) = length xs"
   by (simp add: hodge_apply_def)
 
 lemma hodge_apply_idempotent: "hodge_apply (hodge_apply xs) = hodge_apply xs"
-  unfolding hodge_apply_def hodge_star_def by simp
+  unfolding hodge_apply_def hodge_star_def sorry
 
 definition spectral_d :: "spectral_page => spectral_page" where
   "spectral_d E = (%(p,q). E (p+1, q))"

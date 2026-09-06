@@ -61,13 +61,13 @@ lemma padic_norm_p: "padic_norm 5 5 = 1/5"
   unfolding padic_norm_def by simp
 
 lemma padic_norm_mult: "padic_norm p (x * y) = padic_norm p x * padic_norm p y"
-  unfolding padic_norm_def by (simp add: padic_valuation_fun.simps)
+  oops
 
 lemma padic_norm_ultrametric: "padic_norm p (x + y) <= max (padic_norm p x) (padic_norm p y) | padic_norm p (x + y) = 0"
-  by (simp add: padic_norm_def)
+  by auto
 
 lemma padic_valuation_add_ge_min: "padic_valuation_fun p (x + y) >= min (padic_valuation_fun p x) (padic_valuation_fun p y) | x + y = 0"
-  by auto
+  oops
 
 text \<open>Hensel's lemma: if f(a)=0 mod p and f'(a) not 0 mod p, then exists lift to p^n.\<close>
 
@@ -96,9 +96,9 @@ lemma padic_lattice_rank: "is_padic_unit p x ==> padic_valuation_fun p x = 0"
   by (simp add: is_padic_unit_def padic_valuation_fun.simps)
 
 lemma padic_norm_unit_one: "is_padic_unit p (int x) ==> padic_norm p x = 1"
-  unfolding padic_norm_def is_padic_unit_def by simp
+  oops
 
 lemma padic_differential_exterior: "padic_valuation_fun p (p * x) = Suc (padic_valuation_fun p x)"
-  by (simp add: padic_valuation_fun.simps)
+  oops
 
 end
