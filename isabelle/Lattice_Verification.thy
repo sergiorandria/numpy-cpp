@@ -71,7 +71,7 @@ definition lll_reduced :: "int list list => bool" where
 lemma lll_reduced_empty: "lll_reduced []"
   by (simp add: lll_reduced_def lattice_rank_def)
 
-lemma lll_rank_preserved: "lattice_rank (lll_reduced B ? B : B) = lattice_rank B"
+lemma lll_rank_preserved: "lattice_rank (if lll_reduced B then B else B) = lattice_rank B"
   by (simp add: lattice_rank_def)
 
 end
