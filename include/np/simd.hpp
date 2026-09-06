@@ -167,7 +167,7 @@ template <typename T> struct VectorWidth
 /**
  * @brief Vectorized addition for double arrays (SSE2).
  */
-inline void add_f64_sse2(const double *a, const double *b, double *out, std::size_t n)
+NP_HIDDEN inline void add_f64_sse2(const double *a, const double *b, double *out, std::size_t n)
 {
     std::size_t i = 0;
     const std::size_t vec_end = n - (n % 2);
@@ -190,7 +190,7 @@ inline void add_f64_sse2(const double *a, const double *b, double *out, std::siz
 /**
  * @brief Vectorized addition for float arrays (SSE).
  */
-inline void add_f32_sse(const float *a, const float *b, float *out, std::size_t n)
+NP_HIDDEN inline void add_f32_sse(const float *a, const float *b, float *out, std::size_t n)
 {
     std::size_t i = 0;
     const std::size_t vec_end = n - (n % 4);
@@ -212,7 +212,7 @@ inline void add_f32_sse(const float *a, const float *b, float *out, std::size_t 
 /**
  * @brief Vectorized multiplication for double arrays (SSE2).
  */
-inline void mul_f64_sse2(const double *a, const double *b, double *out, std::size_t n)
+NP_HIDDEN inline void mul_f64_sse2(const double *a, const double *b, double *out, std::size_t n)
 {
     std::size_t i = 0;
     const std::size_t vec_end = n - (n % 2);
@@ -234,7 +234,7 @@ inline void mul_f64_sse2(const double *a, const double *b, double *out, std::siz
 /**
  * @brief Vectorized multiplication for float arrays (SSE).
  */
-inline void mul_f32_sse(const float *a, const float *b, float *out, std::size_t n)
+NP_HIDDEN inline void mul_f32_sse(const float *a, const float *b, float *out, std::size_t n)
 {
     std::size_t i = 0;
     const std::size_t vec_end = n - (n % 4);
@@ -256,7 +256,7 @@ inline void mul_f32_sse(const float *a, const float *b, float *out, std::size_t 
 /**
  * @brief Vectorized sum reduction for double arrays (SSE2).
  */
-inline double sum_f64_sse2(const double *data, std::size_t n)
+NP_HIDDEN inline double sum_f64_sse2(const double *data, std::size_t n)
 {
     __m128d vsum = _mm_setzero_pd();
     std::size_t i = 0;
@@ -285,7 +285,7 @@ inline double sum_f64_sse2(const double *data, std::size_t n)
 /**
  * @brief Vectorized sum reduction for float arrays (SSE).
  */
-inline float sum_f32_sse(const float *data, std::size_t n)
+NP_HIDDEN inline float sum_f32_sse(const float *data, std::size_t n)
 {
     __m128 vsum = _mm_setzero_ps();
     std::size_t i = 0;
@@ -313,7 +313,7 @@ inline float sum_f32_sse(const float *data, std::size_t n)
 /**
  * @brief Vectorized subtraction for double arrays (SSE2).
  */
-inline void sub_f64_sse2(const double *a, const double *b, double *out, std::size_t n)
+NP_HIDDEN inline void sub_f64_sse2(const double *a, const double *b, double *out, std::size_t n)
 {
     std::size_t i = 0;
     const std::size_t vec_end = n - (n % 2);
@@ -335,7 +335,7 @@ inline void sub_f64_sse2(const double *a, const double *b, double *out, std::siz
 /**
  * @brief Vectorized subtraction for float arrays (SSE).
  */
-inline void sub_f32_sse(const float *a, const float *b, float *out, std::size_t n)
+NP_HIDDEN inline void sub_f32_sse(const float *a, const float *b, float *out, std::size_t n)
 {
     std::size_t i = 0;
     const std::size_t vec_end = n - (n % 4);
@@ -357,7 +357,7 @@ inline void sub_f32_sse(const float *a, const float *b, float *out, std::size_t 
 /**
  * @brief Vectorized division for double arrays (SSE2).
  */
-inline void div_f64_sse2(const double *a, const double *b, double *out, std::size_t n)
+NP_HIDDEN inline void div_f64_sse2(const double *a, const double *b, double *out, std::size_t n)
 {
     std::size_t i = 0;
     const std::size_t vec_end = n - (n % 2);
@@ -379,7 +379,7 @@ inline void div_f64_sse2(const double *a, const double *b, double *out, std::siz
 /**
  * @brief Vectorized division for float arrays (SSE).
  */
-inline void div_f32_sse(const float *a, const float *b, float *out, std::size_t n)
+NP_HIDDEN inline void div_f32_sse(const float *a, const float *b, float *out, std::size_t n)
 {
     std::size_t i = 0;
     const std::size_t vec_end = n - (n % 4);
@@ -406,7 +406,7 @@ inline void div_f32_sse(const float *a, const float *b, float *out, std::size_t 
 /**
  * @brief Vectorized addition for double arrays (AVX).
  */
-inline void add_f64_avx(const double *a, const double *b, double *out, std::size_t n)
+NP_HIDDEN inline void add_f64_avx(const double *a, const double *b, double *out, std::size_t n)
 {
     std::size_t i = 0;
     const std::size_t vec_end = n - (n % 4);
@@ -428,7 +428,7 @@ inline void add_f64_avx(const double *a, const double *b, double *out, std::size
 /**
  * @brief Vectorized addition for float arrays (AVX).
  */
-inline void add_f32_avx(const float *a, const float *b, float *out, std::size_t n)
+NP_HIDDEN inline void add_f32_avx(const float *a, const float *b, float *out, std::size_t n)
 {
     std::size_t i = 0;
     const std::size_t vec_end = n - (n % 8);
@@ -450,7 +450,7 @@ inline void add_f32_avx(const float *a, const float *b, float *out, std::size_t 
 /**
  * @brief Vectorized multiplication for double arrays (AVX).
  */
-inline void mul_f64_avx(const double *a, const double *b, double *out, std::size_t n)
+NP_HIDDEN inline void mul_f64_avx(const double *a, const double *b, double *out, std::size_t n)
 {
     std::size_t i = 0;
     const std::size_t vec_end = n - (n % 4);
@@ -472,7 +472,7 @@ inline void mul_f64_avx(const double *a, const double *b, double *out, std::size
 /**
  * @brief Vectorized multiplication for float arrays (AVX).
  */
-inline void mul_f32_avx(const float *a, const float *b, float *out, std::size_t n)
+NP_HIDDEN inline void mul_f32_avx(const float *a, const float *b, float *out, std::size_t n)
 {
     std::size_t i = 0;
     const std::size_t vec_end = n - (n % 8);
@@ -494,7 +494,7 @@ inline void mul_f32_avx(const float *a, const float *b, float *out, std::size_t 
 /**
  * @brief Vectorized sum reduction for double arrays (AVX).
  */
-inline double sum_f64_avx(const double *data, std::size_t n)
+NP_HIDDEN inline double sum_f64_avx(const double *data, std::size_t n)
 {
     __m256d vsum = _mm256_setzero_pd();
     std::size_t i = 0;
@@ -522,7 +522,7 @@ inline double sum_f64_avx(const double *data, std::size_t n)
 /**
  * @brief Vectorized sum reduction for float arrays (AVX).
  */
-inline float sum_f32_avx(const float *data, std::size_t n)
+NP_HIDDEN inline float sum_f32_avx(const float *data, std::size_t n)
 {
     __m256 vsum = _mm256_setzero_ps();
     std::size_t i = 0;
@@ -554,7 +554,7 @@ inline float sum_f32_avx(const float *data, std::size_t n)
 /**
  * @brief Vectorized subtraction for double arrays (AVX).
  */
-inline void sub_f64_avx(const double *a, const double *b, double *out, std::size_t n)
+NP_HIDDEN inline void sub_f64_avx(const double *a, const double *b, double *out, std::size_t n)
 {
     std::size_t i = 0;
     const std::size_t vec_end = n - (n % 4);
@@ -576,7 +576,7 @@ inline void sub_f64_avx(const double *a, const double *b, double *out, std::size
 /**
  * @brief Vectorized subtraction for float arrays (AVX).
  */
-inline void sub_f32_avx(const float *a, const float *b, float *out, std::size_t n)
+NP_HIDDEN inline void sub_f32_avx(const float *a, const float *b, float *out, std::size_t n)
 {
     std::size_t i = 0;
     const std::size_t vec_end = n - (n % 8);
@@ -598,7 +598,7 @@ inline void sub_f32_avx(const float *a, const float *b, float *out, std::size_t 
 /**
  * @brief Vectorized division for double arrays (AVX).
  */
-inline void div_f64_avx(const double *a, const double *b, double *out, std::size_t n)
+NP_HIDDEN inline void div_f64_avx(const double *a, const double *b, double *out, std::size_t n)
 {
     std::size_t i = 0;
     const std::size_t vec_end = n - (n % 4);
@@ -620,7 +620,7 @@ inline void div_f64_avx(const double *a, const double *b, double *out, std::size
 /**
  * @brief Vectorized division for float arrays (AVX).
  */
-inline void div_f32_avx(const float *a, const float *b, float *out, std::size_t n)
+NP_HIDDEN inline void div_f32_avx(const float *a, const float *b, float *out, std::size_t n)
 {
     std::size_t i = 0;
     const std::size_t vec_end = n - (n % 8);
@@ -647,7 +647,7 @@ inline void div_f32_avx(const float *a, const float *b, float *out, std::size_t 
 /**
  * @brief Vectorized addition for double arrays (AVX-512).
  */
-inline void add_f64_avx512(const double *a, const double *b, double *out, std::size_t n)
+NP_HIDDEN inline void add_f64_avx512(const double *a, const double *b, double *out, std::size_t n)
 {
     std::size_t i = 0;
     const std::size_t vec_end = n - (n % 8);
@@ -669,7 +669,7 @@ inline void add_f64_avx512(const double *a, const double *b, double *out, std::s
 /**
  * @brief Vectorized addition for float arrays (AVX-512).
  */
-inline void add_f32_avx512(const float *a, const float *b, float *out, std::size_t n)
+NP_HIDDEN inline void add_f32_avx512(const float *a, const float *b, float *out, std::size_t n)
 {
     std::size_t i = 0;
     const std::size_t vec_end = n - (n % 16);
@@ -691,7 +691,7 @@ inline void add_f32_avx512(const float *a, const float *b, float *out, std::size
 /**
  * @brief Vectorized sum reduction for double arrays (AVX-512).
  */
-inline double sum_f64_avx512(const double *data, std::size_t n)
+NP_HIDDEN inline double sum_f64_avx512(const double *data, std::size_t n)
 {
     __m512d vsum = _mm512_setzero_pd();
     std::size_t i = 0;
@@ -716,7 +716,7 @@ inline double sum_f64_avx512(const double *data, std::size_t n)
 /**
  * @brief Vectorized sum reduction for float arrays (AVX-512).
  */
-inline float sum_f32_avx512(const float *data, std::size_t n)
+NP_HIDDEN inline float sum_f32_avx512(const float *data, std::size_t n)
 {
     __m512 vsum = _mm512_setzero_ps();
     std::size_t i = 0;
@@ -741,7 +741,7 @@ inline float sum_f32_avx512(const float *data, std::size_t n)
 /**
  * @brief Vectorized subtraction for double arrays (AVX-512).
  */
-inline void sub_f64_avx512(const double *a, const double *b, double *out, std::size_t n)
+NP_HIDDEN inline void sub_f64_avx512(const double *a, const double *b, double *out, std::size_t n)
 {
     std::size_t i = 0;
     const std::size_t vec_end = n - (n % 8);
@@ -763,7 +763,7 @@ inline void sub_f64_avx512(const double *a, const double *b, double *out, std::s
 /**
  * @brief Vectorized subtraction for float arrays (AVX-512).
  */
-inline void sub_f32_avx512(const float *a, const float *b, float *out, std::size_t n)
+NP_HIDDEN inline void sub_f32_avx512(const float *a, const float *b, float *out, std::size_t n)
 {
     std::size_t i = 0;
     const std::size_t vec_end = n - (n % 16);
@@ -785,7 +785,7 @@ inline void sub_f32_avx512(const float *a, const float *b, float *out, std::size
 /**
  * @brief Vectorized multiplication for double arrays (AVX-512).
  */
-inline void mul_f64_avx512(const double *a, const double *b, double *out, std::size_t n)
+NP_HIDDEN inline void mul_f64_avx512(const double *a, const double *b, double *out, std::size_t n)
 {
     std::size_t i = 0;
     const std::size_t vec_end = n - (n % 8);
@@ -807,7 +807,7 @@ inline void mul_f64_avx512(const double *a, const double *b, double *out, std::s
 /**
  * @brief Vectorized multiplication for float arrays (AVX-512).
  */
-inline void mul_f32_avx512(const float *a, const float *b, float *out, std::size_t n)
+NP_HIDDEN inline void mul_f32_avx512(const float *a, const float *b, float *out, std::size_t n)
 {
     std::size_t i = 0;
     const std::size_t vec_end = n - (n % 16);
@@ -829,7 +829,7 @@ inline void mul_f32_avx512(const float *a, const float *b, float *out, std::size
 /**
  * @brief Vectorized division for double arrays (AVX-512).
  */
-inline void div_f64_avx512(const double *a, const double *b, double *out, std::size_t n)
+NP_HIDDEN inline void div_f64_avx512(const double *a, const double *b, double *out, std::size_t n)
 {
     std::size_t i = 0;
     const std::size_t vec_end = n - (n % 8);
@@ -851,7 +851,7 @@ inline void div_f64_avx512(const double *a, const double *b, double *out, std::s
 /**
  * @brief Vectorized division for float arrays (AVX-512).
  */
-inline void div_f32_avx512(const float *a, const float *b, float *out, std::size_t n)
+NP_HIDDEN inline void div_f32_avx512(const float *a, const float *b, float *out, std::size_t n)
 {
     std::size_t i = 0;
     const std::size_t vec_end = n - (n % 16);
@@ -878,7 +878,7 @@ inline void div_f32_avx512(const float *a, const float *b, float *out, std::size
 /**
  * @brief Vectorized addition for float arrays (NEON).
  */
-inline void add_f32_neon(const float *a, const float *b, float *out, std::size_t n)
+NP_HIDDEN inline void add_f32_neon(const float *a, const float *b, float *out, std::size_t n)
 {
     std::size_t i = 0;
     const std::size_t vec_end = n - (n % 4);
@@ -900,7 +900,7 @@ inline void add_f32_neon(const float *a, const float *b, float *out, std::size_t
 /**
  * @brief Vectorized multiplication for float arrays (NEON).
  */
-inline void mul_f32_neon(const float *a, const float *b, float *out, std::size_t n)
+NP_HIDDEN inline void mul_f32_neon(const float *a, const float *b, float *out, std::size_t n)
 {
     std::size_t i = 0;
     const std::size_t vec_end = n - (n % 4);
@@ -922,7 +922,7 @@ inline void mul_f32_neon(const float *a, const float *b, float *out, std::size_t
 /**
  * @brief Vectorized sum reduction for float arrays (NEON).
  */
-inline float sum_f32_neon(const float *data, std::size_t n)
+NP_HIDDEN inline float sum_f32_neon(const float *data, std::size_t n)
 {
     float32x4_t vsum = vdupq_n_f32(0.0f);
     std::size_t i = 0;
@@ -951,7 +951,7 @@ inline float sum_f32_neon(const float *data, std::size_t n)
 /**
  * @brief Vectorized subtraction for float arrays (NEON).
  */
-inline void sub_f32_neon(const float *a, const float *b, float *out, std::size_t n)
+NP_HIDDEN inline void sub_f32_neon(const float *a, const float *b, float *out, std::size_t n)
 {
     std::size_t i = 0;
     const std::size_t vec_end = n - (n % 4);
@@ -973,7 +973,7 @@ inline void sub_f32_neon(const float *a, const float *b, float *out, std::size_t
 /**
  * @brief Vectorized division for float arrays (NEON).
  */
-inline void div_f32_neon(const float *a, const float *b, float *out, std::size_t n)
+NP_HIDDEN inline void div_f32_neon(const float *a, const float *b, float *out, std::size_t n)
 {
     std::size_t i = 0;
     const std::size_t vec_end = n - (n % 4);
@@ -996,7 +996,7 @@ inline void div_f32_neon(const float *a, const float *b, float *out, std::size_t
 
 // WASM SIMD128 (wasm_simd128.h) – 128-bit baseline
 #ifdef NP_SIMD_WASM
-inline void add_f32_wasm(const float *a, const float *b, float *out, std::size_t n)
+NP_HIDDEN inline void add_f32_wasm(const float *a, const float *b, float *out, std::size_t n)
 {
     std::size_t i = 0;
     const std::size_t vec_end = n - (n % 4);
@@ -1010,7 +1010,7 @@ inline void add_f32_wasm(const float *a, const float *b, float *out, std::size_t
     for (; i < n; ++i)
         out[i] = a[i] + b[i];
 }
-inline void mul_f32_wasm(const float *a, const float *b, float *out, std::size_t n)
+NP_HIDDEN inline void mul_f32_wasm(const float *a, const float *b, float *out, std::size_t n)
 {
     std::size_t i = 0;
     const std::size_t vec_end = n - (n % 4);
@@ -1028,7 +1028,7 @@ inline void mul_f32_wasm(const float *a, const float *b, float *out, std::size_t
 
 // RISC-V Vector (RVV 1.0) – VLEN agnostic, fallback to scalar if not available
 #ifdef NP_SIMD_RVV
-inline void add_f32_rvv(const float *a, const float *b, float *out, std::size_t n)
+NP_HIDDEN inline void add_f32_rvv(const float *a, const float *b, float *out, std::size_t n)
 {
     std::size_t vl;
     std::size_t i = 0;
@@ -1041,7 +1041,7 @@ inline void add_f32_rvv(const float *a, const float *b, float *out, std::size_t 
         __riscv_vse32_v_f32m8(out + i, vc, vl);
     }
 }
-inline void mul_f32_rvv(const float *a, const float *b, float *out, std::size_t n)
+NP_HIDDEN inline void mul_f32_rvv(const float *a, const float *b, float *out, std::size_t n)
 {
     std::size_t vl;
     std::size_t i = 0;
@@ -1058,7 +1058,7 @@ inline void mul_f32_rvv(const float *a, const float *b, float *out, std::size_t 
 
 // ARM SVE – variable vector length
 #ifdef NP_SIMD_SVE
-inline void add_f32_sve(const float *a, const float *b, float *out, std::size_t n)
+NP_HIDDEN inline void add_f32_sve(const float *a, const float *b, float *out, std::size_t n)
 {
     std::size_t i = 0;
     svbool_t pg = svptrue_b32();
@@ -1077,7 +1077,7 @@ inline void add_f32_sve(const float *a, const float *b, float *out, std::size_t 
 
 // POWER VSX / Altivec
 #ifdef NP_SIMD_VSX
-inline void add_f32_vsx(const float *a, const float *b, float *out, std::size_t n)
+NP_HIDDEN inline void add_f32_vsx(const float *a, const float *b, float *out, std::size_t n)
 {
     std::size_t i = 0;
     const std::size_t vec_end = n - (n % 4);

@@ -129,7 +129,7 @@ template <typename T> NP_API inline void secure_zero(std::vector<T> &v) noexcept
 
 namespace detail
 {
-NP_API inline std::size_t secure_page_size() noexcept
+NP_HIDDEN inline std::size_t secure_page_size() noexcept
 {
 #if defined(_WIN32)
     SYSTEM_INFO si;
@@ -143,7 +143,7 @@ NP_API inline std::size_t secure_page_size() noexcept
 #endif
 }
 
-NP_API inline bool secure_mlock(void *ptr, std::size_t n) noexcept
+NP_HIDDEN inline bool secure_mlock(void *ptr, std::size_t n) noexcept
 {
     if (ptr == nullptr || n == 0)
         return false;
@@ -175,7 +175,7 @@ NP_API inline bool secure_mlock(void *ptr, std::size_t n) noexcept
 #endif
 }
 
-NP_API inline void secure_munlock(void *ptr, std::size_t n) noexcept
+NP_HIDDEN inline void secure_munlock(void *ptr, std::size_t n) noexcept
 {
     if (ptr == nullptr || n == 0)
         return;
@@ -189,7 +189,7 @@ NP_API inline void secure_munlock(void *ptr, std::size_t n) noexcept
 #endif
 }
 
-NP_API inline void secure_no_dump(void *ptr, std::size_t n) noexcept
+NP_HIDDEN inline void secure_no_dump(void *ptr, std::size_t n) noexcept
 {
     if (ptr == nullptr || n == 0)
         return;
@@ -212,7 +212,7 @@ NP_API inline void secure_no_dump(void *ptr, std::size_t n) noexcept
 #endif
 }
 
-NP_API inline void secure_allow_dump(void *ptr, std::size_t n) noexcept
+NP_HIDDEN inline void secure_allow_dump(void *ptr, std::size_t n) noexcept
 {
     if (ptr == nullptr || n == 0)
         return;

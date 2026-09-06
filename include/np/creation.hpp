@@ -122,7 +122,7 @@ template <typename T = double, std::ranges::input_range R>
     requires(!std::is_same_v<std::decay_t<R>, std::initializer_list<int>>) &&
             std::convertible_to<std::ranges::range_value_t<R>, int>
 #endif
-NP_NODISCARD NP_SYMBOL_VISIBILITY(hidden) auto __np_builtin_zeros(const R &shape) -> ndarray<T>
+NP_NODISCARD NP_HIDDEN auto __np_builtin_zeros(const R &shape) -> ndarray<T>
 {
     std::vector<int> s{std::ranges::begin(shape), std::ranges::end(shape)};
     if (s.empty())
@@ -238,7 +238,7 @@ template <typename T = double, std::ranges::input_range R>
     requires(!std::is_same_v<std::decay_t<R>, std::initializer_list<int>>) &&
             std::convertible_to<std::ranges::range_value_t<R>, int>
 #endif
-NP_NODISCARD NP_SYMBOL_VISIBILITY(hidden) auto __np_builtin_ones(const R &shape) -> ndarray<T>
+NP_NODISCARD NP_HIDDEN auto __np_builtin_ones(const R &shape) -> ndarray<T>
 {
     std::vector<int> s{std::ranges::begin(shape), std::ranges::end(shape)};
     if (s.empty())
@@ -293,7 +293,7 @@ template <typename T, std::ranges::input_range R>
     requires(!std::is_same_v<std::decay_t<R>, std::initializer_list<int>>) &&
             std::convertible_to<std::ranges::range_value_t<R>, int>
 #endif
-NP_NODISCARD NP_SYMBOL_VISIBILITY(hidden) auto __np_builtin_full(const R &shape, const T &fill_value) -> ndarray<T>
+NP_NODISCARD NP_HIDDEN auto __np_builtin_full(const R &shape, const T &fill_value) -> ndarray<T>
 {
     std::vector<int> s{std::ranges::begin(shape), std::ranges::end(shape)};
     if (s.empty())
@@ -352,7 +352,7 @@ template <typename T = double, std::ranges::input_range R>
     requires(!std::is_same_v<std::decay_t<R>, std::initializer_list<int>>) &&
             std::convertible_to<std::ranges::range_value_t<R>, int>
 #endif
-NP_NODISCARD NP_SYMBOL_VISIBILITY(hidden) auto __np_builtin_empty(const R &shape) -> ndarray<T>
+NP_NODISCARD NP_HIDDEN auto __np_builtin_empty(const R &shape) -> ndarray<T>
 {
     std::vector<int> s{std::ranges::begin(shape), std::ranges::end(shape)};
     if (s.empty())
