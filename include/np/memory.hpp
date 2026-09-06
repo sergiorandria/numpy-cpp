@@ -12,7 +12,6 @@
 #ifndef NP_MEMORY_HPP
 #define NP_MEMORY_HPP
 
-#include <memory>
 #include <span>
 #include <variant>
 #include <vector>

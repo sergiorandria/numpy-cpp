@@ -13,10 +13,8 @@
 #ifndef NP_BITWISE_HPP
 #define NP_BITWISE_HPP
 
-#include <bitset>
 #include <cstddef>
 #include <cstdint>
-#include <limits>
 #include <optional>
 #include <stdexcept>
 #include <string>
@@ -60,7 +58,7 @@ auto _bitwise_broadcast(const ndarray<T> &a, const ndarray<U> &b, Fn &&fn) -> nd
 
 } // namespace detail
 
-// ── Elementwise bit operations ────────────────────────────────────
+// Elementwise bit operations
 
 /**
  * @brief Bitwise AND element-wise (np.bitwise_and).
@@ -260,7 +258,7 @@ NP_NODISCARD inline auto bitwise_right_shift(const ndarray<T> &x1, U shift) -> n
     return right_shift(x1, shift);
 }
 
-// ── Bit packing ───────────────────────────────────────────────────
+// Bit packing
 
 /**
  * @brief Packs binary array into uint8 bits (np.packbits).
@@ -468,7 +466,7 @@ NP_API inline auto unpackbits(const ndarray<std::uint8_t> &a, std::optional<int>
     return out;
 }
 
-// ── Output formatting ─────────────────────────────────────────────
+// Output formatting
 
 /**
  * @brief Binary representation of integer as string (np.binary_repr).

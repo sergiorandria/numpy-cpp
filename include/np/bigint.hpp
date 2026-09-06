@@ -29,9 +29,7 @@
 #ifndef NP_BIGINT_HPP
 #define NP_BIGINT_HPP
 
-#include <algorithm>
 #include <string>
-#include <string_view>
 #include <type_traits>
 #include <vector>
 
@@ -39,7 +37,7 @@
 #include "dtype.hpp"
 #include "ndarray.hpp"
 
-// ── Boost.Multiprecision backend ────────────────────────────────────────
+// Boost.Multiprecision backend
 #if __has_include(<boost/multiprecision/cpp_int.hpp>)
 #include <boost/multiprecision/cpp_int.hpp>
 #define NP_HAS_CPP_INT 1
@@ -247,7 +245,7 @@ template <typename A, typename B> using common_bigint_t = typename common_bigint
 
 } // namespace detail
 
-// ——— fallback bigint string arithmetic helpers ———
+// fallback bigint string arithmetic helpers
 #if !NP_HAS_CPP_INT
 namespace detail::fallback_bigint
 {

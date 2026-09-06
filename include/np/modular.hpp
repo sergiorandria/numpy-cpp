@@ -28,7 +28,6 @@
 
 #include <algorithm>
 #include <complex>
-#include <numeric>
 #include <stdexcept>
 #include <vector>
 
