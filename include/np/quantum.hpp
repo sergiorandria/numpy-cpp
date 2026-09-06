@@ -66,10 +66,9 @@ namespace np::quantum
     requires ComplexType<T>
   class IStateVector
   {
-  protected:
+  public:
     ndarray<T> amps;
 
-  public:
     IStateVector() = default;
 
     explicit IStateVector(int n_qubits) : amps(std::vector<int>{1 << n_qubits})
@@ -98,23 +97,27 @@ namespace np::quantum
   // StateVector
   class StateVector : public IStateVector<c128>
   {
-    private: 
-      _GuardBytes guard;
-      
-      auto assert_bytes_ok() { 
+  private:
+    _GuardBytes guard;
 
-      }
-
-    public:
-    StateVector() = default;
-    explicit StateVector(int n_qubits)
+    auto __st_assert_bytes_ok() -> bool
     {
-      this->amps = ndarray<c128>(std::vector<int>{1 << n_qubits});
+      return guard.bytes != 0xDEADBEEF;
+    }
+
+  public:
+    StateVector() = default;
+    explicit StateVector(int n_qubits) : IStateVector<c128>(n_qubits)
+    {
+      __st_assert_bytes_ok();
+
       this->amps[0] = c128(1, 0);
     }
 
     explicit StateVector(ndarray<c128>&& a)
     {
+      __st_assert_bytes_ok();
+
       this->amps = std::move(std::forward<ndarray<c128>>(a));
     }
 
@@ -163,23 +166,23 @@ namespace np::quantum
 
       if (qubit < 0 || qubit >= n)
         return std::nullopt;
-      
+
       double p0 = 0;
-      
+
       for (size_t i = 0; i < amps.size(); ++i)
         if (((i >> qubit) & 1) == 0)
           p0 += prob(static_cast<int>(i));
-      
+
       std::mt19937 eng{42};
       double r = rand01 < 0 ? std::generate_canonical<double, 10>(eng) : rand01;
       int outcome = (r < p0) ? 0 : 1;
-      
+
       // collapse
       double norm_factor = outcome == 0 ? std::sqrt(p0) : std::sqrt(1 - p0);
       if (norm_factor < 1e-12)
         return outcome;
-      
-        for (size_t i = 0; i < amps.size(); ++i)
+
+      for (size_t i = 0; i < amps.size(); ++i)
         if (((i >> qubit) & 1) != outcome)
           amps[i] = c128(0, 0);
         else
@@ -479,7 +482,7 @@ namespace np::quantum
     }
   };
 
-  // ── Decorator: noisy StateVector ────────────────────────────────────────
+  // Decorator: noisy StateVector
   struct NoisyStateVector
   {
     StateVector inner;
