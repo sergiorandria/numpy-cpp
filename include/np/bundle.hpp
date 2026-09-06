@@ -272,7 +272,7 @@ NP_NODISCARD inline bigint euler_characteristic_via_euler_class(const VectorBund
     return bigint(base->euler_characteristic());
 }
 
-// ── Whitney sum ────────────────────────────────────────────────────────
+// Whitney sum
 
 NP_NODISCARD inline VectorBundle whitney_sum(const VectorBundle &A, const VectorBundle &B)
 {
@@ -315,7 +315,7 @@ NP_NODISCARD inline CharacteristicClasses whitney_sum_classes(const Characterist
     return S;
 }
 
-// ── Hodge theory ───────────────────────────────────────────────────────
+// Hodge theory
 
 struct HodgeStar
 {

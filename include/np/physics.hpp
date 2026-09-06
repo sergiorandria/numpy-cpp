@@ -7,14 +7,11 @@
 
 #include "api_macros.hpp"
 #include "differential.hpp"
-#include "fft.hpp"
 #include "gpu.hpp"
 #include "lattice.hpp"
 #include "linalg.hpp"
 #include "ndarray.hpp"
 #include "pqc.hpp"
-#include "simd.hpp"
-#include "spectral.hpp"
 #include <algorithm>
 #include <cmath>
 #include <utility>
@@ -241,7 +238,7 @@ struct NavierStokes2D
         return max_div;
     }
 
-    // ── Integrated subsystems (Strategy + Factory) ─────────────────────────
+    // Integrated subsystems (Strategy + Factory)
 
     /// Advection scheme selector (Strategy)
     enum class AdvectionScheme : std::uint8_t
@@ -358,7 +355,7 @@ struct NavierStokes2D
     }
   };
 
-  // ── PoissonSolver Strategy (Factory) ───────────────────────────────────
+  // PoissonSolver Strategy (Factory)
   struct PoissonSolver
   {
     virtual ~PoissonSolver() = default;
@@ -455,7 +452,7 @@ struct NavierStokes2D
     }
   };
 
-  // ── Lattice AMR hook (decorator) ───────────────────────────────────────
+  // Lattice AMR hook (decorator)
   // Refines grid where |ω| is large, using lattice::Lattice for point set
   NP_NODISCARD inline FluidState lattice_refine(const FluidState &s, double thresh = 1.0)
   {
@@ -468,7 +465,7 @@ struct NavierStokes2D
     return s;
   }
 
-  // ── p-adic hook (for Re = p-adic valuation test) ───────────────────────
+  // p-adic hook (for Re = p-adic valuation test)
   NP_NODISCARD inline bool is_padic_unit_Re(double Re, int p = 5)
   {
     // Re is unit in Q_p iff valuation 0
