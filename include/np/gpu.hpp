@@ -330,25 +330,51 @@ inline void cpu_gemm_blocked_f64(const double *a, const double *b, double *c, st
 NP_NODISCARD inline std::vector<DeviceInfo> enumerate_devices() noexcept
 {
     std::vector<DeviceInfo> out;
-    int cnt = 0;
-    if (detail::probe_cuda_driver_cached(&cnt) && cnt > 0)
+    // Deduplicate CUDA driver vs runtime: they refer to same physical GPUs
+    int driver_cnt = 0, runtime_cnt = 0;
+    bool has_driver = detail::probe_cuda_driver_cached(&driver_cnt) && driver_cnt > 0;
+    bool has_runtime = false;
+#if defined(NP_GPU_HAS_CUDA_RUNTIME)
     {
-        for (int i = 0; i < cnt; ++i)
-            out.push_back(DeviceInfo{Backend::CudaDriver, i, "CUDA device " + std::to_string(i), 0, true});
+        int c = 0;
+        if (cudaGetDeviceCount(&c) == cudaSuccess && c > 0)
+        {
+            runtime_cnt = c;
+            has_runtime = true;
+        }
     }
+#endif
+    int cuda_cnt = 0;
+    Backend cuda_backend = Backend::None;
+    if (has_driver && has_runtime)
+    {
+        cuda_cnt = std::max(driver_cnt, runtime_cnt);
+        cuda_backend = Backend::CudaRuntime; // prefer runtime when both present
+    }
+    else if (has_runtime)
+    {
+        cuda_cnt = runtime_cnt;
+        cuda_backend = Backend::CudaRuntime;
+    }
+    else if (has_driver)
+    {
+        cuda_cnt = driver_cnt;
+        cuda_backend = Backend::CudaDriver;
+    }
+    if (cuda_cnt > 0)
+    {
+        for (int i = 0; i < cuda_cnt; ++i)
+            out.push_back(DeviceInfo{cuda_backend, i,
+                                     (cuda_backend == Backend::CudaRuntime ? "CUDA runtime " : "CUDA device ") +
+                                         std::to_string(i),
+                                     0, true});
+    }
+    int cnt = 0;
     if (detail::probe_openmp_target(&cnt) && cnt > 0)
     {
         for (int i = 0; i < cnt; ++i)
             out.push_back(DeviceInfo{Backend::OpenMPTarget, i, "OpenMP target " + std::to_string(i), 0, true});
     }
-#if defined(NP_GPU_HAS_CUDA_RUNTIME)
-    {
-        int c = 0;
-        if (cudaGetDeviceCount(&c) == cudaSuccess && c > 0)
-            for (int i = 0; i < c; ++i)
-                out.push_back(DeviceInfo{Backend::CudaRuntime, i, "CUDA runtime " + std::to_string(i), 0, true});
-    }
-#endif
 #if defined(NP_GPU_HAS_HIP_RUNTIME)
     {
         int c = 0;
@@ -497,7 +523,7 @@ inline void matmul(const T *a, const T *b, T *c, std::size_t M, std::size_t N, s
         cpu_matmul(a, b, c, M, N, K);
 }
 
-// ── FFT GPU offload (cuFFT dlopen + OpenMP) ──────────────────────────
+// FFT GPU offload (cuFFT dlopen + OpenMP)
 namespace fft_detail
 {
 inline bool probe_cufft() noexcept
@@ -536,38 +562,15 @@ NP_NODISCARD inline bool try_fft(const Cplx *in, Cplx *out, std::size_t N, bool 
     }
 #endif
 #if defined(_OPENMP) && defined(NP_ENABLE_GPU)
+    // GPU FFT via OpenMP target: previously contained naive O(N^2) DFT that
+    // returned true, misleading caller into thinking a log-linear FFT ran.
+    // Real GPU FFT requires cuFFT (see probe_cufft above); without it we
+    // return false so caller falls back to CPU radix-2 FFT. This keeps the
+    // contract that try_fft==true means a correct FFT, not a quadratic DFT.
     if (detail::probe_openmp_target())
     {
-        try
-        {
-            // Naive DFT offload for demonstration – radix2 would be better
-            // Use OpenMP target to compute DFT in parallel (O(N^2) but parallel)
-            // For benchmark, we offload the existing radix2 butterflies via target
-            // Here we just do a simple parallel DFT for large N when GPU is present
-            // Fallback to CPU if N is not power of two
-            if ((N & (N - 1)) != 0)
-                return false;
-#pragma omp target data map(to : in[0 : N]) map(from : out[0 : N])
-            {
-#pragma omp target teams distribute parallel for
-                for (std::size_t k = 0; k < N; ++k)
-                {
-                    Cplx sum{0, 0};
-                    for (std::size_t n = 0; n < N; ++n)
-                    {
-                        double angle = (inverse ? 1 : -1) * 2 * 3.141592653589793 * double(k * n) / double(N);
-                        Cplx w{std::cos(angle), std::sin(angle)};
-                        sum += in[n] * w;
-                    }
-                    out[k] = sum;
-                }
-            }
-            return true;
-        }
-        catch (...)
-        {
-            return false;
-        }
+        // No valid GPU FFT path without cuFFT; do not claim success.
+        (void)fft_detail::probe_cufft;
     }
 #endif
     (void)in;
@@ -698,7 +701,7 @@ NP_NODISCARD inline bool try_graph_batch_matmul(const std::vector<const T *> &As
                                                 std::vector<T *> &Cs, std::size_t M, std::size_t N,
                                                 std::size_t K) noexcept;
 
-// ── Async streams & batch for powerful multi-GPU ────────────────────────
+// Async streams & batch for powerful multi-GPU
 struct Stream
 {
     int device = 0;
@@ -828,7 +831,7 @@ inline void sharded_matmul(const T *a, const T *b, T *c, std::size_t M, std::siz
 #endif
 }
 
-// ── CUDA 12/13 new features (header-only, dlopen) ────────────────────────
+// CUDA 12/13 new features (header-only, dlopen)
 NP_NODISCARD inline bool is_blackwell() noexcept
 {
     return cuda::is_blackwell(10);
