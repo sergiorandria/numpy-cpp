@@ -49,12 +49,6 @@
 #include "threadpool.hpp"
 #endif
 
-// Suppress -Wbraced-scalar-init for NDProxy braced-init (e.g.
-// {{{1},{2},{3}},{{1},{2},{3}}} shape 2×3×1)
-#if defined(__clang__)
-#pragma clang diagnostic ignored "-Wbraced-scalar-init"
-#endif
-
 namespace np
 {
 namespace matrix
@@ -275,6 +269,13 @@ template <typename List, typename T> inline void nested_flatten(const List &lst,
 }
 
 // NDProxy for arbitrary-depth braced-init (proxy pattern)
+// Suppress -Wbraced-scalar-init only around this proxy (e.g.
+// {{{1},{2},{3}},{{1},{2},{3}}} shape 2x3x1); scoped push/pop so user
+// code including this header keeps the warning enabled.
+#if defined(__clang__)
+#pragma clang diagnostic push
+#pragma clang diagnostic ignored "-Wbraced-scalar-init"
+#endif
 template <typename T> struct NDProxy
 {
     std::vector<NDProxy> children;
@@ -290,6 +291,9 @@ template <typename T> struct NDProxy
     {
     }
 };
+#if defined(__clang__)
+#pragma clang diagnostic pop
+#endif
 
 template <typename T> inline std::vector<int> proxy_shape(const NDProxy<T> &p)
 {

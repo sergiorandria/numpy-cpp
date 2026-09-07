@@ -70,10 +70,10 @@
 #include "variety.hpp"
 #include "window.hpp"
 
-// Suppress -Wbraced-scalar-init for NDProxy braced-init (e.g.
-// {{{1},{2},{3}},{{1},{2},{3}}} shape 2×3×1)
-#if defined(__clang__)
-#pragma clang diagnostic ignored "-Wbraced-scalar-init"
-#endif
+// NOTE: No blanket -Wbraced-scalar-init suppression here. That warning is
+// scoped with push/pop directly around NDProxy in ndarray.hpp; an unscoped
+// pragma at the bottom of this umbrella header would miss the already-
+// included library code and instead silence the warning for all user code
+// following the include.
 
 #endif // NP_NP_HPP
