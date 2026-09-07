@@ -10,8 +10,10 @@
 #define NP_HALF_HPP
 
 #include "api_macros.hpp"
+#include "ndarray.hpp"
 #include <cstdint>
 #include <cstring>
+#include <type_traits>
 
 namespace np
 {
