@@ -46,7 +46,9 @@ namespace np::cuda
 {
 
 // ── CUDA version helpers ──────────────────────────────────────────────────
-NP_NODISCARD inline int driver_version() noexcept
+// Uncached probes (single dlopen cycle each). Prefer the cached
+// driver_version()/runtime_version() below on hot paths.
+NP_NODISCARD inline int driver_version_uncached() noexcept
 {
 #if defined(__has_include) && __has_include(<dlfcn.h>) && !defined(_WIN32)
     void *h = dlopen("libcuda.so.1", RTLD_LAZY);
@@ -66,7 +68,7 @@ NP_NODISCARD inline int driver_version() noexcept
 #endif
 }
 
-NP_NODISCARD inline int runtime_version() noexcept
+NP_NODISCARD inline int runtime_version_uncached() noexcept
 {
 #if defined(__has_include) && __has_include(<dlfcn.h>) && !defined(_WIN32)
     void *h = dlopen("libcudart.so", RTLD_LAZY);
@@ -85,6 +87,75 @@ NP_NODISCARD inline int runtime_version() noexcept
     return v;
 #else
     return 0;
+#endif
+}
+
+// Cached versions: one dlopen per process (thread-safe static init).
+NP_NODISCARD inline int driver_version() noexcept
+{
+#if defined(__has_include) && __has_include(<dlfcn.h>) && !defined(_WIN32)
+    static const int cached = driver_version_uncached();
+    return cached;
+#else
+    return 0;
+#endif
+}
+
+NP_NODISCARD inline int runtime_version() noexcept
+{
+#if defined(__has_include) && __has_include(<dlfcn.h>) && !defined(_WIN32)
+    static const int cached = runtime_version_uncached();
+    return cached;
+#else
+    return 0;
+#endif
+}
+
+// ── Device compute-capability query ───────────────────────────────────────
+// Driver version only tells which CUDA API the installed driver supports,
+// not what silicon is present. Capability checks must query the device.
+NP_NODISCARD inline bool device_compute_capability(int device, int &major, int &minor) noexcept
+{
+    major = 0;
+    minor = 0;
+#if defined(__has_include) && __has_include(<dlfcn.h>) && !defined(_WIN32)
+    void *h = dlopen("libcuda.so.1", RTLD_LAZY);
+    if (!h)
+        h = dlopen("libcuda.so", RTLD_LAZY);
+    if (!h)
+        return false;
+    using cuInit_t = int (*)(unsigned int);
+    // CUdevice is an int in the CUDA driver API; avoid pulling <cuda.h>.
+    using cuDeviceGet_t = int (*)(int *, int);
+    using cuDeviceGetAttribute_t = int (*)(int *, int, int);
+    auto cuInit = reinterpret_cast<cuInit_t>(dlsym(h, "cuInit"));
+    auto cuDeviceGet = reinterpret_cast<cuDeviceGet_t>(dlsym(h, "cuDeviceGet"));
+    auto cuDeviceGetAttribute =
+        reinterpret_cast<cuDeviceGetAttribute_t>(dlsym(h, "cuDeviceGetAttribute"));
+    bool ok = false;
+    if (cuInit && cuDeviceGet && cuDeviceGetAttribute)
+    {
+        // CU_DEVICE_ATTRIBUTE_COMPUTE_CAPABILITY_MAJOR=75, MINOR=76
+        constexpr int kMajorAttr = 75;
+        constexpr int kMinorAttr = 76;
+        int cu_dev = 0;
+        if (cuInit(0) == 0 && cuDeviceGet(&cu_dev, device) == 0)
+        {
+            int maj = 0, min = 0;
+            if (cuDeviceGetAttribute(&maj, kMajorAttr, cu_dev) == 0 &&
+                cuDeviceGetAttribute(&min, kMinorAttr, cu_dev) == 0)
+            {
+                major = maj;
+                minor = min;
+                ok = true;
+            }
+        }
+    }
+    dlclose(h);
+    return ok;
+#else
+    (void)device;
+    return false;
 #endif
 }
 
@@ -254,12 +325,34 @@ NP_NODISCARD inline bool has_cooperative() noexcept
     return v >= NP_CUDA_DRIVER_COOP_MIN;
 }
 
-// ── Blackwell / Hopper arch helpers (CUDA 12.8+ / 13) ─────────────────────
+// ── Blackwell / Hopper arch helpers ─────────────────────────────────────────
+// NOTE: driver version only indicates which CUDA API the driver supports.
+// Architecture predicates below query the actual device compute capability
+// (device 0 by default) and fall back to the driver-version heuristic only
+// when no device can be queried (e.g. no GPU present).
+NP_NODISCARD inline bool is_blackwell_device(int device = 0) noexcept
+{
+    // Blackwell is SM 100+ (100/103/120/121, ...); Hopper is SM 90.
+    int major = 0, minor = 0;
+    if (device_compute_capability(device, major, minor))
+        return major >= 10;
+    return driver_version() >= NP_CUDA_DRIVER_BLACKWELL_MIN;
+}
+
 NP_NODISCARD inline bool is_blackwell(int major = 10) noexcept
 {
-    // Blackwell is SM 100/103 (CUDA 12.8+), Hopper is 90
-    int v = driver_version();
-    // Heuristic: driver >= 12080 supports Blackwell
+    // Legacy heuristic overload kept for compatibility: `major` is the
+    // expected compute-major to test for. Prefer is_blackwell_device().
+    int actual_major = 0, actual_minor = 0;
+    if (device_compute_capability(0, actual_major, actual_minor))
+    {
+        if (major >= 10)
+            return actual_major >= 10;
+        if (major == 9)
+            return actual_major == 9;
+        return false;
+    }
+    const int v = driver_version();
     if (major >= 10)
         return v >= NP_CUDA_DRIVER_BLACKWELL_MIN;
     if (major == 9)
@@ -267,18 +360,22 @@ NP_NODISCARD inline bool is_blackwell(int major = 10) noexcept
     return false;
 }
 
-NP_NODISCARD inline bool has_fp8_tensor() noexcept
+NP_NODISCARD inline bool has_fp8_tensor(int device = 0) noexcept
 {
-    // FP8 tensor cores: Hopper+ (SM90+) and Blackwell
-    int v = driver_version();
-    return v >= NP_CUDA_DRIVER_HOPPER_MIN;
+    // FP8 tensor cores: Hopper (SM90+) and Blackwell.
+    int major = 0, minor = 0;
+    if (device_compute_capability(device, major, minor))
+        return major >= 9;
+    return driver_version() >= NP_CUDA_DRIVER_HOPPER_MIN;
 }
 
-NP_NODISCARD inline bool has_fp4_tensor() noexcept
+NP_NODISCARD inline bool has_fp4_tensor(int device = 0) noexcept
 {
-    // FP4: Blackwell (SM100) + CUDA 12.8+
-    int v = driver_version();
-    return v >= NP_CUDA_DRIVER_BLACKWELL_MIN;
+    // FP4: Blackwell (SM100+) + CUDA 12.8+.
+    int major = 0, minor = 0;
+    if (device_compute_capability(device, major, minor))
+        return major >= 10 && driver_version() >= NP_CUDA_DRIVER_BLACKWELL_MIN;
+    return driver_version() >= NP_CUDA_DRIVER_BLACKWELL_MIN;
 }
 
 // ── Pinned / async helpers that gpu.hpp can call ──────────────────────────
