@@ -66,6 +66,12 @@
 #define NP_GPU_HAS_HIP_RUNTIME 1
 #endif
 
+// NP_ENABLE_CUDA is a hard requirement on the CUDA toolkit headers.
+// Driver-only probing (no headers) remains available via NP_ENABLE_GPU.
+#if defined(NP_ENABLE_CUDA) && !defined(NP_GPU_HAS_CUDA_RUNTIME)
+#error "NP_ENABLE_CUDA requires <cuda_runtime.h> (CUDA toolkit); else use -DNP_ENABLE_GPU."
+#endif
+
 namespace np::gpu
 {
 
@@ -160,6 +166,38 @@ inline bool probe_cuda_driver_cached(int *out_count = nullptr) noexcept
     if (out_count)
         *out_count = cached.second;
     return cached.first;
+}
+
+// True when a CUDA backend (runtime or driver) reports devices.
+// OpenMP-target offload is only a fallback when this returns false.
+inline bool has_cuda_backend() noexcept
+{
+    int c = 0;
+    if (probe_cuda_driver_cached(&c) && c > 0)
+        return true;
+#if defined(NP_GPU_HAS_CUDA_RUNTIME)
+    if (cudaGetDeviceCount(&c) == cudaSuccess && c > 0)
+        return true;
+#endif
+    return false;
+}
+
+// CUDA GEMM entry point (cuBLAS). Currently unimplemented — returns false
+// so callers fall back to CPU. Implemented here (not inline in try_matmul)
+// so the CUDA-first ordering stays put when the cuBLAS path lands.
+template <typename T>
+NP_NODISCARD inline bool try_cuda_matmul(const T *a, const T *b, T *c, std::size_t M, std::size_t N,
+                                         std::size_t K) noexcept
+{
+    (void)a;
+    (void)b;
+    (void)c;
+    (void)M;
+    (void)N;
+    (void)K;
+    // TODO: cuBLAS Sgemm/Dgemm (handle cache per thread/stream) + device
+    // alloc/copy/async on selected device, then return true on success.
+    return false;
 }
 
 inline void cpu_gemm_blocked_f32(const float *a, const float *b, float *c, std::size_t M, std::size_t N, std::size_t K)
@@ -330,51 +368,25 @@ inline void cpu_gemm_blocked_f64(const double *a, const double *b, double *c, st
 NP_NODISCARD inline std::vector<DeviceInfo> enumerate_devices() noexcept
 {
     std::vector<DeviceInfo> out;
-    // Deduplicate CUDA driver vs runtime: they refer to same physical GPUs
-    int driver_cnt = 0, runtime_cnt = 0;
-    bool has_driver = detail::probe_cuda_driver_cached(&driver_cnt) && driver_cnt > 0;
-    bool has_runtime = false;
-#if defined(NP_GPU_HAS_CUDA_RUNTIME)
-    {
-        int c = 0;
-        if (cudaGetDeviceCount(&c) == cudaSuccess && c > 0)
-        {
-            runtime_cnt = c;
-            has_runtime = true;
-        }
-    }
-#endif
-    int cuda_cnt = 0;
-    Backend cuda_backend = Backend::None;
-    if (has_driver && has_runtime)
-    {
-        cuda_cnt = std::max(driver_cnt, runtime_cnt);
-        cuda_backend = Backend::CudaRuntime; // prefer runtime when both present
-    }
-    else if (has_runtime)
-    {
-        cuda_cnt = runtime_cnt;
-        cuda_backend = Backend::CudaRuntime;
-    }
-    else if (has_driver)
-    {
-        cuda_cnt = driver_cnt;
-        cuda_backend = Backend::CudaDriver;
-    }
-    if (cuda_cnt > 0)
-    {
-        for (int i = 0; i < cuda_cnt; ++i)
-            out.push_back(DeviceInfo{cuda_backend, i,
-                                     (cuda_backend == Backend::CudaRuntime ? "CUDA runtime " : "CUDA device ") +
-                                         std::to_string(i),
-                                     0, true});
-    }
     int cnt = 0;
+    if (detail::probe_cuda_driver_cached(&cnt) && cnt > 0)
+    {
+        for (int i = 0; i < cnt; ++i)
+            out.push_back(DeviceInfo{Backend::CudaDriver, i, "CUDA device " + std::to_string(i), 0, true});
+    }
     if (detail::probe_openmp_target(&cnt) && cnt > 0)
     {
         for (int i = 0; i < cnt; ++i)
             out.push_back(DeviceInfo{Backend::OpenMPTarget, i, "OpenMP target " + std::to_string(i), 0, true});
     }
+#if defined(NP_GPU_HAS_CUDA_RUNTIME)
+    {
+        int c = 0;
+        if (cudaGetDeviceCount(&c) == cudaSuccess && c > 0)
+            for (int i = 0; i < c; ++i)
+                out.push_back(DeviceInfo{Backend::CudaRuntime, i, "CUDA runtime " + std::to_string(i), 0, true});
+    }
+#endif
 #if defined(NP_GPU_HAS_HIP_RUNTIME)
     {
         int c = 0;
@@ -451,14 +463,24 @@ NP_NODISCARD inline bool try_matmul(const T *a, const T *b, T *c, std::size_t M,
 {
     if (M == 0 || N == 0 || K == 0 || !a || !b || !c)
         return false;
-    // Use 128-bit to avoid size_t overflow on large dims
-    __int128 prod = static_cast<__int128>(M) * static_cast<__int128>(N) * static_cast<__int128>(K);
-    __int128 mn = static_cast<__int128>(M) * static_cast<__int128>(N);
-    if (prod < 1000000 && mn < 65536)
+    // Threshold check in double to avoid size_t overflow without
+    // non-standard 128-bit integers (which fail -Wpedantic -Werror).
+    // Thresholds (1e6 / 65536) are far below 2^53 so the comparison
+    // is exact for small sizes and safely over-threshold for huge ones.
+    const double prod = static_cast<double>(M) * static_cast<double>(N) * static_cast<double>(K);
+    const double mn = static_cast<double>(M) * static_cast<double>(N);
+    if (prod < 1000000.0 && mn < 65536.0)
         return false;
     if (!is_available())
         return false;
 
+    // CUDA first: when a CUDA backend is detected, OpenMP offload is skipped
+    // (it targets the same physical GPUs). Falls back to CPU below until
+    // try_cuda_matmul implements the cuBLAS path.
+    if (detail::has_cuda_backend())
+        return detail::try_cuda_matmul(a, b, c, M, N, K);
+
+    // OpenMP-target fallback: only when no CUDA backend was detected.
 #if defined(_OPENMP) && (defined(NP_ENABLE_GPU) || defined(NP_ENABLE_OPENMP))
     if (detail::probe_openmp_target())
     {
@@ -523,7 +545,7 @@ inline void matmul(const T *a, const T *b, T *c, std::size_t M, std::size_t N, s
         cpu_matmul(a, b, c, M, N, K);
 }
 
-// FFT GPU offload (cuFFT dlopen + OpenMP)
+// FFT GPU offload (cuFFT dlopen + OpenMP) 
 namespace fft_detail
 {
 inline bool probe_cufft() noexcept
@@ -553,24 +575,55 @@ NP_NODISCARD inline bool try_fft(const Cplx *in, Cplx *out, std::size_t N, bool 
         return false; // CPU radix2 already very fast for small N (tune::fft_threshold)
     if (!is_available())
         return false;
-#if defined(NP_GPU_HAS_CUDA_RUNTIME) && defined(NP_ENABLE_CUDA)
-    if (fft_detail::probe_cufft())
+    // CUDA first: when a CUDA backend is detected, OpenMP offload is skipped.
+    // The cuFFT path is not implemented yet, so this returns false (CPU radix2
+    // below) instead of falling through to OpenMP.
+    if (detail::has_cuda_backend())
     {
-        // cuFFT path would be via dlopen cufftPlan1d/cufftExecZ2Z
-        // For header-only, we fall through to OpenMP target as portable
-        // (real cuFFT would require linking -lcufft, which we avoid here)
-    }
+#if defined(NP_GPU_HAS_CUDA_RUNTIME) && defined(NP_ENABLE_CUDA)
+        if (fft_detail::probe_cufft())
+        {
+            // cuFFT path would be via dlopen cufftPlan1d/cufftExecZ2Z
+            // For header-only, we fall through to OpenMP target as portable
+            // (real cuFFT would require linking -lcufft, which we avoid here)
+        }
 #endif
+        return false;
+    }
+    // OpenMP-target fallback: only when no CUDA backend was detected.
 #if defined(_OPENMP) && defined(NP_ENABLE_GPU)
-    // GPU FFT via OpenMP target: previously contained naive O(N^2) DFT that
-    // returned true, misleading caller into thinking a log-linear FFT ran.
-    // Real GPU FFT requires cuFFT (see probe_cufft above); without it we
-    // return false so caller falls back to CPU radix-2 FFT. This keeps the
-    // contract that try_fft==true means a correct FFT, not a quadratic DFT.
     if (detail::probe_openmp_target())
     {
-        // No valid GPU FFT path without cuFFT; do not claim success.
-        (void)fft_detail::probe_cufft;
+        try
+        {
+            // Naive DFT offload for demonstration – radix2 would be better
+            // Use OpenMP target to compute DFT in parallel (O(N^2) but parallel)
+            // For benchmark, we offload the existing radix2 butterflies via target
+            // Here we just do a simple parallel DFT for large N when GPU is present
+            // Fallback to CPU if N is not power of two
+            if ((N & (N - 1)) != 0)
+                return false;
+#pragma omp target data map(to : in[0 : N]) map(from : out[0 : N])
+            {
+#pragma omp target teams distribute parallel for
+                for (std::size_t k = 0; k < N; ++k)
+                {
+                    Cplx sum{0, 0};
+                    for (std::size_t n = 0; n < N; ++n)
+                    {
+                        double angle = (inverse ? 1 : -1) * 2 * 3.141592653589793 * double(k * n) / double(N);
+                        Cplx w{std::cos(angle), std::sin(angle)};
+                        sum += in[n] * w;
+                    }
+                    out[k] = sum;
+                }
+            }
+            return true;
+        }
+        catch (...)
+        {
+            return false;
+        }
     }
 #endif
     (void)in;
@@ -701,7 +754,7 @@ NP_NODISCARD inline bool try_graph_batch_matmul(const std::vector<const T *> &As
                                                 std::vector<T *> &Cs, std::size_t M, std::size_t N,
                                                 std::size_t K) noexcept;
 
-// Async streams & batch for powerful multi-GPU
+// ── Async streams & batch for powerful multi-GPU ────────────────────────
 struct Stream
 {
     int device = 0;
@@ -709,10 +762,10 @@ struct Stream
     // For CPU fallback, use ThreadPool; for GPU, OpenMP target nowait
     template <typename Fn> auto enqueue(Fn &&fn) -> std::future<std::invoke_result_t<Fn>>
     {
-        using R = std::invoke_result_t<Fn>;
         // Use async with launch::async to overlap with caller; on powerful
         // machines this maps to ThreadPool or GPU stream
 #if defined(NP_ENABLE_GPU) && defined(_OPENMP)
+        using R = std::invoke_result_t<Fn>;
         if (is_available())
         {
             // GPU path: use OpenMP target task with heap-allocated packaged_task
@@ -831,7 +884,7 @@ inline void sharded_matmul(const T *a, const T *b, T *c, std::size_t M, std::siz
 #endif
 }
 
-// CUDA 12/13 new features (header-only, dlopen)
+// CUDA 12/13 new features (header-only, dlopen) 
 NP_NODISCARD inline bool is_blackwell() noexcept
 {
     return cuda::is_blackwell(10);
