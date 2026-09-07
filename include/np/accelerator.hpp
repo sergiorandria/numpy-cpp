@@ -17,6 +17,10 @@
 #include <memory>
 #include <string>
 
+// GPU offload tuning (macros, no magic numbers in logic)
+#define NP_ACCEL_GPU_SIZE_THRESH 1000000
+#define NP_ACCEL_BENCH_DIM 128
+
 namespace np::accelerator
 {
 
@@ -110,11 +114,11 @@ struct AutoAccelerator : IAccelerator
     ndarray<float> matmul(const ndarray<float> &a, const ndarray<float> &b) override
     {
         std::call_once(once_, [&] {
-            if (gpu::is_available() && a.size() * b.size() > 1'000'000)
+            if (gpu::is_available() && a.size() * b.size() > NP_ACCEL_GPU_SIZE_THRESH)
             {
                 auto bench = [](IAccelerator &acc) -> double {
-                    auto aa = np::eye<float>(128);
-                    auto bb = np::eye<float>(128);
+                    auto aa = np::eye<float>(NP_ACCEL_BENCH_DIM);
+                    auto bb = np::eye<float>(NP_ACCEL_BENCH_DIM);
                     auto t0 = std::chrono::steady_clock::now();
                     auto cc = acc.matmul(aa, bb);
                     auto t1 = std::chrono::steady_clock::now();

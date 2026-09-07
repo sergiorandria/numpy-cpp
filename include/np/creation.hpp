@@ -18,6 +18,11 @@
 
 #include <array>
 #include <cmath>
+
+// Array creation defaults (macros, no magic numbers in logic)
+#define NP_CREATION_DEFAULT_NUM 50
+#define NP_CREATION_LOG_BASE 10
+#define NP_CREATION_GEOM_BASE 10.0
 #include <concepts>
 #include <cstddef>
 #include <initializer_list>
@@ -528,7 +533,7 @@ NP_API template <typename T> NP_NODISCARD auto arange(T stop) -> ndarray<T>
  * Reference: numpy-reference/reference/generated/numpy.linspace.html
  */
 NP_API template <typename T>
-NP_NODISCARD auto linspace(T start, T stop, std::size_t num = 50, bool endpoint = true)
+NP_NODISCARD auto linspace(T start, T stop, std::size_t num = NP_CREATION_DEFAULT_NUM, bool endpoint = true)
     -> ndarray<std::conditional_t<std::is_floating_point_v<T>, T, double>>
 {
     using R = std::conditional_t<std::is_floating_point_v<T>, T, double>;
@@ -567,7 +572,8 @@ NP_NODISCARD auto linspace(T start, T stop, std::size_t num = 50, bool endpoint 
  * Reference: numpy-reference/reference/generated/numpy.logspace.html
  */
 NP_API template <typename T>
-NP_NODISCARD auto logspace(T start, T stop, std::size_t num = 50, T base = T{10}) -> ndarray<double>
+NP_NODISCARD auto logspace(T start, T stop, std::size_t num = NP_CREATION_DEFAULT_NUM, T base = T{NP_CREATION_LOG_BASE})
+    -> ndarray<double>
 {
     auto powers = linspace(start, stop, num);
     ndarray<double> out(std::vector<int>{static_cast<int>(num)});
@@ -742,7 +748,8 @@ NP_NODISCARD auto asarray(const std::vector<T> &values, const std::vector<int> &
  * Reference: numpy-reference/reference/generated/numpy.geomspace.html
  */
 NP_API template <typename T>
-NP_NODISCARD auto geomspace(T start, T stop, std::size_t num = 50, bool endpoint = true) -> ndarray<double>
+NP_NODISCARD auto geomspace(T start, T stop, std::size_t num = NP_CREATION_DEFAULT_NUM, bool endpoint = true)
+    -> ndarray<double>
 {
     if (num == 0)
     {
@@ -766,7 +773,7 @@ NP_NODISCARD auto geomspace(T start, T stop, std::size_t num = 50, bool endpoint
     ndarray<double> out(std::vector<int>{static_cast<int>(num)});
     for (std::size_t i = 0; i < num; ++i)
     {
-        double v = std::pow(10.0, p.data()[i]);
+        double v = std::pow(NP_CREATION_GEOM_BASE, p.data()[i]);
         out.data()[i] = neg ? -v : v;
     }
     return out;

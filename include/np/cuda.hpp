@@ -23,6 +23,11 @@
 #include <dlfcn.h>
 #endif
 
+// CUDA version thresholds (macros, no magic numbers in logic)
+#define NP_CUDA_DRIVER_COOP_MIN 9000
+#define NP_CUDA_DRIVER_HOPPER_MIN 11080
+#define NP_CUDA_DRIVER_BLACKWELL_MIN 12080
+
 // Define opaque handle types without pulling <cuda_runtime.h>
 #ifndef NP_CUDA_TYPES_DEFINED
 #define NP_CUDA_TYPES_DEFINED
@@ -246,7 +251,7 @@ NP_NODISCARD inline int stream_end_capture(void *stream, void **out_graph) noexc
 NP_NODISCARD inline bool has_cooperative() noexcept
 {
     int v = driver_version();
-    return v >= 9000;
+    return v >= NP_CUDA_DRIVER_COOP_MIN;
 }
 
 // ── Blackwell / Hopper arch helpers (CUDA 12.8+ / 13) ─────────────────────
@@ -256,9 +261,9 @@ NP_NODISCARD inline bool is_blackwell(int major = 10) noexcept
     int v = driver_version();
     // Heuristic: driver >= 12080 supports Blackwell
     if (major >= 10)
-        return v >= 12080;
+        return v >= NP_CUDA_DRIVER_BLACKWELL_MIN;
     if (major == 9)
-        return v >= 11080 && v < 12080;
+        return v >= NP_CUDA_DRIVER_HOPPER_MIN && v < NP_CUDA_DRIVER_BLACKWELL_MIN;
     return false;
 }
 
@@ -266,14 +271,14 @@ NP_NODISCARD inline bool has_fp8_tensor() noexcept
 {
     // FP8 tensor cores: Hopper+ (SM90+) and Blackwell
     int v = driver_version();
-    return v >= 11080;
+    return v >= NP_CUDA_DRIVER_HOPPER_MIN;
 }
 
 NP_NODISCARD inline bool has_fp4_tensor() noexcept
 {
     // FP4: Blackwell (SM100) + CUDA 12.8+
     int v = driver_version();
-    return v >= 12080;
+    return v >= NP_CUDA_DRIVER_BLACKWELL_MIN;
 }
 
 // ── Pinned / async helpers that gpu.hpp can call ──────────────────────────
