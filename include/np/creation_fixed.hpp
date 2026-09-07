@@ -28,6 +28,7 @@
 #include <cctype>
 #include <cstddef>
 #include <cstring>
+#include <optional>
 #include <sstream>
 #include <stdexcept>
 #include <string>
@@ -317,10 +318,8 @@ NP_NODISCARD auto frombuffer(const std::vector<char> &buffer, std::size_t offset
 namespace detail
 {
 
-inline char require_normalize_token(std::string tok)
+inline const std::unordered_map<std::string, char> &require_aliases()
 {
-    for (auto &c : tok)
-        c = static_cast<char>(std::toupper(static_cast<unsigned char>(c)));
     static const std::unordered_map<std::string, char> aliases = {
         {"C", 'C'},
         {"C_CONTIGUOUS", 'C'},
@@ -338,22 +337,42 @@ inline char require_normalize_token(std::string tok)
         {"E", 'E'},
         {"ENSUREARRAY", 'E'},
     };
-    auto it = aliases.find(tok);
-    if (it == aliases.end())
-        throw std::invalid_argument("require: unknown requirement '" + tok + "'");
-    return it->second;
+    return aliases;
 }
 
-// Accepts either run-together letters ("CFA") or comma/space-separated tokens
-// ("C, WRITEABLE") — mirrors numpy's acceptance of a string OR a list of flag names.
+inline std::string require_upper(std::string tok)
+{
+    for (auto &c : tok)
+        c = static_cast<char>(std::toupper(static_cast<unsigned char>(c)));
+    return tok;
+}
+
+inline std::optional<char> require_try_lookup(const std::string &normalized_tok)
+{
+    auto it = require_aliases().find(normalized_tok);
+    return it == require_aliases().end() ? std::nullopt : std::optional<char>(it->second);
+}
+
+inline char require_lookup(const std::string &tok)
+{
+    if (auto v = require_try_lookup(require_upper(tok)))
+        return *v;
+    throw std::invalid_argument("require: unknown requirement '" + tok + "'");
+}
+
 inline std::vector<char> require_parse(const std::string &requirements)
 {
     std::vector<char> flags;
     if (requirements.find_first_of(", \t") == std::string::npos)
     {
+        // No separator: could be one multi-char alias ("OWNDATA") or a run of
+        // single-char flags ("CFA"). Try the whole token as one alias first —
+        // only fall back to per-character parsing if that lookup fails.
+        if (!requirements.empty())
+            if (auto whole = require_try_lookup(require_upper(requirements)))
+                return {*whole};
         for (char c : requirements)
-            if (!std::isspace(static_cast<unsigned char>(c)))
-                flags.push_back(require_normalize_token(std::string(1, c)));
+            flags.push_back(require_lookup(std::string(1, c)));
         return flags;
     }
     std::istringstream iss(requirements);
@@ -363,17 +382,14 @@ inline std::vector<char> require_parse(const std::string &requirements)
         std::istringstream wss(chunk);
         std::string word;
         while (wss >> word)
-            flags.push_back(require_normalize_token(word));
+            flags.push_back(require_lookup(word));
     }
     return flags;
 }
 
-} // namespace detail
-
-NP_API template <typename T, int... E>
-NP_NODISCARD auto require(const ndarrayf<T, E...> &a, const std::string &requirements = "C") -> ndarrayf<T, E...>
+template <typename T, int... E> void require_validate(const std::string &requirements)
 {
-    for (char f : detail::require_parse(requirements))
+    for (char f : require_parse(requirements))
     {
         switch (f)
         {
@@ -382,28 +398,32 @@ NP_NODISCARD auto require(const ndarrayf<T, E...> &a, const std::string &require
         case 'W':
         case 'O':
         case 'E':
-            break; // trivially true: fixed storage is C-contiguous, aligned,
-                   // writeable (T isn't const-qualified here), and self-owning.
+            break; // trivially true: fixed storage is C-contiguous, self-owning, no views
         case 'F':
             if constexpr (sizeof...(E) > 1)
-            {
                 throw std::invalid_argument("require: 'F' (Fortran order) requested but ndarrayf<T,E...> "
-                                            "only ever stores row-major order for rank > 1; there is no "
-                                            "Fortran-order fixed array type to convert into");
-            }
-            // rank <= 1: C-order and F-order coincide, trivially satisfied.
-            break;
+                                            "only ever stores row-major order for rank > 1");
+            break; // rank <= 1: C-order and F-order coincide
         default:
             throw std::invalid_argument("require: unhandled requirement flag");
         }
     }
+}
+
+} // namespace detail
+
+NP_API template <typename T, int... E>
+NP_NODISCARD auto require(const ndarrayf<T, E...> &a, const std::string &requirements = "C") -> ndarrayf<T, E...>
+{
+    detail::require_validate<T, E...>(requirements);
     return a;
 }
 
 NP_API template <typename T, int... E>
 NP_NODISCARD auto require(ndarrayf<T, E...> &&a, const std::string &requirements = "C") -> ndarrayf<T, E...>
 {
-    return require(static_cast<const ndarrayf<T, E...> &>(a), requirements);
+    detail::require_validate<T, E...>(requirements);
+    return std::move(a);
 }
 
 } // namespace np
