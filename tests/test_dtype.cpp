@@ -57,40 +57,40 @@ int main()
     test::check(dtype_size(dtype::int32) == 4, "dtype_size int32");
     test::check(dtype_size(dtype::complex128) == 16, "dtype_size c128");
 
-    // _Np_dtype storage-classifier alias set: each alias binds a compile-time
+    // dtype_storage storage-classifier alias set: each alias binds a compile-time
     // dtype to its native storage and remains usable as a plain scalar.
-    static_assert(std::is_same_v<_Np_dtype::_Np_int8::value_type, std::int8_t>);
-    static_assert(std::is_same_v<_Np_dtype::_Np_uint64::value_type, std::uint64_t>);
-    static_assert(std::is_same_v<_Np_dtype::_Np_float32::value_type, float>);
-    static_assert(std::is_same_v<_Np_dtype::_Np_float64::value_type, double>);
-    static_assert(std::is_same_v<_Np_dtype::_Np_complex128::value_type, std::complex<double>>);
-    static_assert(std::is_same_v<_Np_dtype::_Np_bool_::value_type, bool>);
-    static_assert(std::is_same_v<_Np_dtype::_Np_datetime64::value_type, std::int64_t>);
-    static_assert(_Np_dtype::_Np_int64::type == dtype::int64);
-    static_assert(_Np_dtype::_Np_float16::type == dtype::float16);
-    static_assert(_Np_dtype::_Np_int8::get_type() == dtype::int8);
-    static_assert(_Np_dtype::_Np_complex64::get_type() == dtype::complex64);
+    static_assert(std::is_same_v<dtype_storage::int8::value_type, std::int8_t>);
+    static_assert(std::is_same_v<dtype_storage::uint64::value_type, std::uint64_t>);
+    static_assert(std::is_same_v<dtype_storage::float32::value_type, float>);
+    static_assert(std::is_same_v<dtype_storage::float64::value_type, double>);
+    static_assert(std::is_same_v<dtype_storage::complex128::value_type, std::complex<double>>);
+    static_assert(std::is_same_v<dtype_storage::bool_::value_type, bool>);
+    static_assert(std::is_same_v<dtype_storage::datetime64::value_type, std::int64_t>);
+    static_assert(dtype_storage::int64::type == dtype::int64);
+    static_assert(dtype_storage::float16::type == dtype::float16);
+    static_assert(dtype_storage::int8::get_type() == dtype::int8);
+    static_assert(dtype_storage::complex64::get_type() == dtype::complex64);
 
     // Classifier behaves like its scalar value.
-    _Np_dtype::_Np_int64 a{static_cast<std::int64_t>(7)};
-    static_assert(_Np_dtype::_Np_int64{static_cast<std::int64_t>(3)}.value() == static_cast<std::int64_t>(3));
+    dtype_storage::int64 a{static_cast<std::int64_t>(7)};
+    static_assert(dtype_storage::int64{static_cast<std::int64_t>(3)}.value() == static_cast<std::int64_t>(3));
     test::check(static_cast<std::int64_t>(a) == 7, "classifier convert");
     a = static_cast<std::int64_t>(9);
     test::check(a.value() == 9, "classifier assign");
-    test::check(_Np_dtype::_Np_float64{1.5}.get_type() == dtype::float64, "classifier get_type");
+    test::check(dtype_storage::float64{1.5}.get_type() == dtype::float64, "classifier get_type");
 
     // Compile-time comparison between classifiers.
-    static_assert(_Np_dtype::_Np_int32{} == _Np_dtype::_Np_int32{});
-    static_assert(_Np_dtype::_Np_int32{} != _Np_dtype::_Np_float32{});
+    static_assert(dtype_storage::int32{} == dtype_storage::int32{});
+    static_assert(dtype_storage::int32{} != dtype_storage::float32{});
 
     // String fallback storage for the non-integral string/unicode dtypes.
-    _Np_dtype::_Np_string s{"hello"};
+    dtype_storage::string s{"hello"};
     test::check(std::string(s.value()) == "hello", "string fallback value");
-    static_assert(_Np_dtype::_Np_string::type == dtype::string_);
-    static_assert(_Np_dtype::_Np_unicode::type == dtype::unicode_);
-    static_assert(std::is_same_v<_Np_dtype::_Np_string::value_type, std::string>);
-    static_assert(std::is_same_v<_Np_dtype::_Np_unicode::value_type, std::u32string>);
-    _Np_dtype::_Np_unicode u(U"café");
+    static_assert(dtype_storage::string::type == dtype::string_);
+    static_assert(dtype_storage::unicode::type == dtype::unicode_);
+    static_assert(std::is_same_v<dtype_storage::string::value_type, std::string>);
+    static_assert(std::is_same_v<dtype_storage::unicode::value_type, std::u32string>);
+    dtype_storage::unicode u(U"café");
     test::check(u.value() == U"café", "unicode fallback value");
 
     // Compile-time integral/numeric trait.

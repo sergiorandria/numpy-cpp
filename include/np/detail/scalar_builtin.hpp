@@ -5,13 +5,13 @@
  * The array business logic (ndarray_fixed.hpp and detail/expr.hpp) routes
  * every per-element computation through the internal class
  * `np::detail::fixed::scalar_traits<T>`, so one code path serves both the
- * builtin C++ scalars and the custom `_Np_dtype` storage-classifier types
+ * builtin C++ scalars and the custom `dtype_storage` storage-classifier types
  * from dtype.hpp.
  *
  * This header ships the primary template: the identity behaviour for the
  * plain scalars (arithmetic, bool and std::complex), plus the elementwise
  * `binary_apply` / `unary_apply` dispatch for the builtin branch. The
- * custom backend for the `_Np_dtype` classifier types lives in
+ * custom backend for the `dtype_storage` classifier types lives in
  * scalar_custom.hpp.
  *
  * @author Sergio Randriamihoatra (sergiorandriamihoatra@gmail.com)
