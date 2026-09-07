@@ -27,24 +27,26 @@
 #include "api_macros.hpp"
 #include "cuda.hpp"
 #include "powerful.hpp"
+#include <algorithm>
 #include <cmath>
 #include <complex>
 #include <cstddef>
 #include <cstdint>
+#include <cstdlib>
+#include <future>
+#include <memory>
+#include <mutex>
+#include <optional>
 #include <string>
+#include <thread>
+#include <type_traits>
+#include <vector>
 #if defined(__AVX2__) || defined(__AVX__)
 #include <immintrin.h>
 #endif
 #if defined(__linux__)
 #include <sys/mman.h>
 #endif
-#include <algorithm>
-#include <future>
-#include <memory>
-#include <mutex>
-#include <optional>
-#include <thread>
-#include <vector>
 
 #if defined(__has_include)
 #if __has_include(<dlfcn.h>) && !defined(_WIN32)
@@ -145,6 +147,19 @@ inline bool probe_openmp_target(int *out_count = nullptr) noexcept
     (void)out_count;
     return false;
 #endif
+}
+
+// Cached probe to avoid repeated dlopen/cuInit on hot path (thread-safe static init in C++11+)
+inline bool probe_cuda_driver_cached(int *out_count = nullptr) noexcept
+{
+    static const auto cached = [] {
+        int cnt = 0;
+        bool ok = probe_cuda_driver(&cnt);
+        return std::pair<bool, int>{ok, cnt};
+    }();
+    if (out_count)
+        *out_count = cached.second;
+    return cached.first;
 }
 
 inline void cpu_gemm_blocked_f32(const float *a, const float *b, float *c, std::size_t M, std::size_t N, std::size_t K)
@@ -303,7 +318,7 @@ inline void cpu_gemm_blocked_f64(const double *a, const double *b, double *c, st
                             _mm512_storeu_pd(c + i * N + j, cv);
                         }
 #endif
-                        for (std::size_t j = jj; j < j_max; ++j)
+                        for (; j < j_max; ++j)
                             c[i * N + j] += av * b[p * N + j];
                     }
             }
@@ -316,7 +331,7 @@ NP_NODISCARD inline std::vector<DeviceInfo> enumerate_devices() noexcept
 {
     std::vector<DeviceInfo> out;
     int cnt = 0;
-    if (detail::probe_cuda_driver(&cnt) && cnt > 0)
+    if (detail::probe_cuda_driver_cached(&cnt) && cnt > 0)
     {
         for (int i = 0; i < cnt; ++i)
             out.push_back(DeviceInfo{Backend::CudaDriver, i, "CUDA device " + std::to_string(i), 0, true});
@@ -350,7 +365,7 @@ NP_NODISCARD inline std::vector<DeviceInfo> enumerate_devices() noexcept
 NP_NODISCARD inline bool is_available() noexcept
 {
     int c = 0;
-    if (detail::probe_cuda_driver(&c) && c > 0)
+    if (detail::probe_cuda_driver_cached(&c) && c > 0)
         return true;
     if (detail::probe_openmp_target(&c) && c > 0)
         return true;
@@ -373,23 +388,28 @@ NP_NODISCARD inline bool is_available() noexcept
 
 NP_NODISCARD inline int device_count() noexcept
 {
-    int total = 0;
-    int c = 0;
-    if (detail::probe_cuda_driver(&c))
-        total += c;
-    if (detail::probe_openmp_target(&c))
-        total += c;
+    int driver_cnt = 0, omp_cnt = 0, runtime_cnt = 0;
+    bool has_driver = detail::probe_cuda_driver_cached(&driver_cnt);
+    bool has_omp = detail::probe_openmp_target(&omp_cnt);
+    (void)has_driver;
+    (void)has_omp;
 #if defined(NP_GPU_HAS_CUDA_RUNTIME)
-    if (cudaGetDeviceCount(&c) == cudaSuccess)
-        total += c;
+    if (cudaGetDeviceCount(&runtime_cnt) != cudaSuccess)
+        runtime_cnt = 0;
 #endif
-    return total;
+    // Avoid double-counting same physical GPUs when both driver and runtime are present
+    int cuda_total = 0;
+    if (driver_cnt > 0 && runtime_cnt > 0)
+        cuda_total = std::max(driver_cnt, runtime_cnt);
+    else
+        cuda_total = driver_cnt + runtime_cnt;
+    return cuda_total + omp_cnt;
 }
 
 NP_NODISCARD inline Backend preferred_backend() noexcept
 {
     int c = 0;
-    if (detail::probe_cuda_driver(&c) && c > 0)
+    if (detail::probe_cuda_driver_cached(&c) && c > 0)
         return Backend::CudaDriver;
 #if defined(NP_GPU_HAS_CUDA_RUNTIME)
     if (cudaGetDeviceCount(&c) == cudaSuccess && c > 0)
@@ -405,7 +425,10 @@ NP_NODISCARD inline bool try_matmul(const T *a, const T *b, T *c, std::size_t M,
 {
     if (M == 0 || N == 0 || K == 0 || !a || !b || !c)
         return false;
-    if (M * N * K < 1'000'000 && M * N < 65536)
+    // Use 128-bit to avoid size_t overflow on large dims
+    __int128 prod = static_cast<__int128>(M) * static_cast<__int128>(N) * static_cast<__int128>(K);
+    __int128 mn = static_cast<__int128>(M) * static_cast<__int128>(N);
+    if (prod < 1000000 && mn < 65536)
         return false;
     if (!is_available())
         return false;
@@ -563,7 +586,11 @@ inline void *pinned_alloc(std::size_t bytes) noexcept
 #if defined(__linux__)
     void *p = std::aligned_alloc(64, ((bytes + 63) / 64) * 64);
     if (p)
+    {
+#ifdef MADV_HUGEPAGE
         madvise(p, bytes, MADV_HUGEPAGE);
+#endif
+    }
     return p;
 #else
     return std::aligned_alloc(64, ((bytes + 63) / 64) * 64);
@@ -620,26 +647,56 @@ inline void *managed_alloc(std::size_t bytes) noexcept
 inline void managed_free(void *p) noexcept
 {
 #if defined(NP_GPU_HAS_CUDA_RUNTIME)
-    // Try cudaFree
+    // Try cudaFree (runtime API)
     if (p && cudaFree(p) == cudaSuccess)
         return;
 #endif
 #if defined(__has_include) && __has_include(<dlfcn.h>) && !defined(_WIN32)
-    void *h = dlopen("libcudart.so", RTLD_LAZY);
-    if (h)
+    // Try cudaFree via dlopen (runtime)
     {
-        using cudaFree_t = int (*)(void *);
-        auto sym = reinterpret_cast<cudaFree_t>(dlsym(h, "cudaFree"));
-        if (sym && sym(p) == 0)
+        void *h = dlopen("libcudart.so", RTLD_LAZY);
+        if (!h)
+            h = dlopen("libcudart.so.12", RTLD_LAZY);
+        if (h)
         {
+            using cudaFree_t = int (*)(void *);
+            auto sym = reinterpret_cast<cudaFree_t>(dlsym(h, "cudaFree"));
+            if (sym && sym(p) == 0)
+            {
+                dlclose(h);
+                return;
+            }
             dlclose(h);
-            return;
         }
-        dlclose(h);
+    }
+    // Try driver API cuMemFree (mirrors managed_alloc fallback to cuMemAllocManaged)
+    {
+        void *h = dlopen("libcuda.so.1", RTLD_LAZY);
+        if (!h)
+            h = dlopen("libcuda.so", RTLD_LAZY);
+        if (h)
+        {
+            using cuMemFree_t = int (*)(void *);
+            auto sym = reinterpret_cast<cuMemFree_t>(dlsym(h, "cuMemFree"));
+            if (!sym)
+                sym = reinterpret_cast<cuMemFree_t>(dlsym(h, "cuMemFree_v2"));
+            if (sym && sym(p) == 0)
+            {
+                dlclose(h);
+                return;
+            }
+            dlclose(h);
+        }
     }
 #endif
     pinned_free(p, 0);
 }
+
+// Forward declare for batch_matmul (defined later)
+template <typename T>
+NP_NODISCARD inline bool try_graph_batch_matmul(const std::vector<const T *> &As, const std::vector<const T *> &Bs,
+                                                std::vector<T *> &Cs, std::size_t M, std::size_t N,
+                                                std::size_t K) noexcept;
 
 // ── Async streams & batch for powerful multi-GPU ────────────────────────
 struct Stream
@@ -655,12 +712,14 @@ struct Stream
 #if defined(NP_ENABLE_GPU) && defined(_OPENMP)
         if (is_available())
         {
-            // GPU path: use OpenMP target task
-            std::packaged_task<R()> pt(std::forward<Fn>(fn));
-            auto fut = pt.get_future();
-            // Offload as task (best effort)
-#pragma omp task shared(pt)
-            pt();
+            // GPU path: use OpenMP target task with heap-allocated packaged_task
+            // to avoid dangling reference when task is deferred.
+            auto pt = std::make_shared<std::packaged_task<R()>>(std::forward<Fn>(fn));
+            auto fut = pt->get_future();
+#pragma omp task firstprivate(pt)
+            {
+                (*pt)();
+            }
             return fut;
         }
 #endif
