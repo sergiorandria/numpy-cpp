@@ -41,17 +41,17 @@ int main()
     {
         auto Sn = sphere(n);
         auto hg = Sn->homology();
-        // H_0 = Z, H_n = Z, others 0
-        test::check(hg[0].betti == 1, "S^n H0=Z");
+        // H_0 = Z^2 for S^0 (two points), H_0 = Z and H_n = Z otherwise.
+        test::check(hg[0].betti == (n == 0 ? 2 : 1), "S^n H0");
         if (n >= 1)
             test::check(hg[n].betti == 1, "S^n Hn=Z");
         for (int k = 1; k < n; ++k)
             test::check(hg[k].betti == 0, "S^n intermediate 0");
         // de Rham
         auto dr = Sn->de_rham(n);
-        test::check(dr.betti == 1, "S^n de Rham Hn=R");
+        test::check(dr.betti == (n == 0 ? 2 : 1), "S^n de Rham Hn");
         auto dr0 = Sn->de_rham(0);
-        test::check(dr0.betti == 1, "S^n de Rham H0=R");
+        test::check(dr0.betti == (n == 0 ? 2 : 1), "S^n de Rham H0");
         if (n >= 1)
             test::check(Sn->de_rham(1).betti == (n == 1 ? 1 : 0), "S^n de Rham H1");
     }
