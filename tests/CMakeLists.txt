@@ -8,6 +8,7 @@ set(NP_TESTS
     test_fft
     test_fixed
     test_math
+    test_emath
     test_logic
     test_concatenate
     test_random
