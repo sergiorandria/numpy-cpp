@@ -81,6 +81,63 @@ int main()
         test::check(is_homotopy_equivalent(S1, S1), "S1 homotopy self");
     }
 
+    // ── Rational cup product (cochain-level, not pattern tables) ──────────
+    {
+        using namespace np::cohomology;
+        auto T2 = np::manifold::torus_complex(2);
+        auto RT2 = cohomology_ring(T2);
+        test::check(!RT2.inconclusive, "T2 cup conclusive");
+        test::check(cup_pairing_rank(T2, 1, 1) == 1, "T2 cup rank 1");
+        bool t2_nonzero = false;
+        for (int a = 0; a < 2; ++a)
+        {
+            for (int b = 0; b < 2; ++b)
+            {
+                if (cup_product(T2, 1, 1, a, b) >= 0)
+                {
+                    t2_nonzero = true;
+                }
+            }
+        }
+        test::check(t2_nonzero, "T2 some H1 cup nonzero");
+        // Wedge S¹∨S¹∨S²: same Betti [1,2,1] and Euler 0 as T², trivial cup.
+        SimplicialComplex W({
+            {{0}, {1}, {2}, {3}, {4}, {5}, {6}, {7}},
+            {{0, 1}, {1, 2}, {0, 2}, {0, 3}, {3, 4}, {0, 4}, {0, 5}, {0, 6}, {0, 7}, {5, 6}, {5, 7}, {6, 7}},
+            {{0, 5, 6}, {0, 5, 7}, {0, 6, 7}, {5, 6, 7}},
+        });
+        auto bettiW = betti_numbers(W);
+        test::check(bettiW.size() == 3 && bettiW[0] == 1 && bettiW[1] == 2 && bettiW[2] == 1, "wedge Betti [1,2,1]");
+        auto RW = cohomology_ring(W);
+        test::check(!RW.inconclusive, "wedge cup conclusive");
+        test::check(cup_pairing_rank(W, 1, 1) == 0, "wedge cup rank 0");
+        bool wedge_allzero = true;
+        for (int a = 0; a < 2; ++a)
+        {
+            for (int b = 0; b < 2; ++b)
+            {
+                if (cup_product(W, 1, 1, a, b) != -1)
+                {
+                    wedge_allzero = false;
+                }
+            }
+        }
+        test::check(wedge_allzero, "wedge H1 cups all zero");
+        // Same homology, different ring: conclusively not equivalent
+        // (previously provisional-true).
+        auto r = np::homotopy::is_homotopy_equivalent(T2, W);
+        test::check(!r.equivalent && !r.inconclusive, "T2 vs wedge distinguished by cup");
+        // S² self: agreement stays provisional (Whitehead needs a map).
+        auto S2 = np::manifold::sphere_complex(2);
+        test::check(cup_product(S2, 0, 2, 0, 0) == 0, "S2 unit cup");
+        auto rs = np::homotopy::is_homotopy_equivalent(S2, S2);
+        test::check(rs.equivalent && rs.inconclusive, "S2 self provisional");
+        // Circle: no H², cup rank 0, still conclusive.
+        auto S1 = np::manifold::sphere_complex(1);
+        test::check(cup_pairing_rank(S1, 1, 1) == 0, "S1 cup rank 0");
+        test::check(!cohomology_ring(S1).inconclusive, "S1 cup conclusive");
+    }
+
     // ── AnyManifold variant ────────────────────────────────────────────────
     {
         AnyManifold v = np::manifold::make_sphere(2);

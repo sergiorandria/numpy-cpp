@@ -5,7 +5,8 @@
  * Provides `np::homotopy` routines that decide homotopy equivalence for
  * finite simplicial complexes via computable invariants:
  *   - `is_simply_connected`, `is_contractible`, `is_aspherical`
- *   - `is_homotopy_equivalent` (Betti + Euler + H₁ torsion, Whitehead)
+ *   - `is_homotopy_equivalent` (Betti + Euler + H₁ torsion + rational cup,
+ *     Whitehead with the inducing-map caveat)
  *   - `fundamental_group_abelianization` (H₁)
  *   - `homotopy_group` (π₁ via H₁, higher via Hurewicz/aspherical)
  *
@@ -13,6 +14,12 @@
  * implement necessary invariants that are sufficient for many classical
  * examples (spheres, tori, wedges, graphs) and otherwise return
  * `inconclusive=true` conservatively.
+ *
+ * Soundness note: Whitehead's theorem needs a *map* inducing the homology
+ * isomorphism, not just abstractly isomorphic homology (CP² vs S²∨S⁴ is the
+ * textbook counterexample). The simply-connected branch therefore compares
+ * rational cup products and stays provisional on agreement instead of
+ * claiming a conclusive equivalence.
  *
  * Improvements over previous stub:
  *   - Graphs (1-dim) are aspherical: π_{≥2}=0 conclusively (universal cover is a tree).
@@ -32,10 +39,53 @@
 #include <vector>
 
 #include "api_macros.hpp"
+#include "cohomology.hpp"
 #include "homology.hpp"
 
 namespace np::homotopy
 {
+
+namespace detail
+{
+/**
+ * @brief True unless both rings are conclusive with different rational cup
+ * pairing ranks. Basis-independent comparison; unknown (inconclusive ring,
+ * oversized complex, malformed input) counts as agree, keeping the verdict
+ * provisional rather than wrong.
+ */
+NP_NODISCARD inline bool rational_cups_agree(const homology::SimplicialComplex &A, const homology::SimplicialComplex &B)
+{
+    try
+    {
+        const auto RA = cohomology::cohomology_ring(A);
+        const auto RB = cohomology::cohomology_ring(B);
+        if (RA.inconclusive || RB.inconclusive)
+        {
+            return true;
+        }
+        if (RA.groups.size() != RB.groups.size())
+        {
+            return false;
+        }
+        const int D = static_cast<int>(RA.groups.size()) - 1;
+        for (int p = 0; p <= D; ++p)
+        {
+            for (int q = 0; q <= D; ++q)
+            {
+                if (cohomology::cup_pairing_rank(A, p, q) != cohomology::cup_pairing_rank(B, p, q))
+                {
+                    return false;
+                }
+            }
+        }
+        return true;
+    }
+    catch (const std::invalid_argument &)
+    {
+        return true; // malformed (unclosed) input: stay provisional, fail loud elsewhere
+    }
+}
+} // namespace detail
 
 struct HomotopyResult
 {
@@ -107,8 +157,10 @@ NP_NODISCARD inline std::vector<homology::HomologyGroup> fundamental_group_abeli
  *   1. `betti_numbers` equality (over Q)
  *   2. `euler_characteristic` equality
  *   3. `H₁` torsion equality (abelianization of π₁)
- *   4. If both simply connected and 2-3 hold, Whitehead ⇒ equivalent.
- *   5. If both graphs (dim≤1) and 1-3 hold, homology determines homotopy.
+ *   4. Rational cup-product agreement (conclusive `false` on mismatch).
+ *   5. If both simply connected and 1-4 hold: provisional `true`
+ *      (Whitehead needs an inducing map, not just abstract iso).
+ *   6. If both graphs (dim≤1) and 1-3 hold, homology determines homotopy.
  * Otherwise returns `inconclusive=true` (higher invariants needed).
  */
 NP_NODISCARD inline HomotopyResult is_homotopy_equivalent(const homology::SimplicialComplex &A,
@@ -141,7 +193,11 @@ NP_NODISCARD inline HomotopyResult is_homotopy_equivalent(const homology::Simpli
 
     if (scA && scB)
     {
-        return {true, false, "Simply connected + homology iso (Whitehead)"};
+        if (!detail::rational_cups_agree(A, B))
+        {
+            return {false, false, "Rational cup products differ"};
+        }
+        return {true, true, "Simply connected + homology/cup iso; Whitehead needs an inducing map: provisional"};
     }
 
     // Both non-simply connected
@@ -156,12 +212,15 @@ NP_NODISCARD inline HomotopyResult is_homotopy_equivalent(const homology::Simpli
         return {false, false, "One graph, other not: not homotopy equivalent"};
     }
     // Higher-dimensional non-simply connected: homology iso is necessary but not
-    // sufficient (e.g., lens spaces). For aspherical spaces (tori, etc.) it would
-    // be sufficient, but without cohomology ring we mark provisional.
-    // Keep equivalent=true for backward compat (self torus, etc.) but flag inconclusive.
+    // sufficient (e.g., lens spaces). The rational cup product is a further
+    // necessary invariant: mismatch is conclusive, agreement stays provisional.
+    if (!detail::rational_cups_agree(A, B))
+    {
+        return {false, false, "Rational cup products differ"};
+    }
     return {true, true,
-            "Same H₁+Betti but non-simply connected higher dims: provisional (need π₂, cup "
-            "product)"};
+            "Same H₁+Betti+cup but non-simply connected higher dims: provisional (need π₂, torsion "
+            "pairing)"};
 }
 
 NP_NODISCARD inline HomotopyResult is_homotopy_equivalent(const std::vector<ndarray<int>> &bmsA,
@@ -189,7 +248,11 @@ NP_NODISCARD inline HomotopyResult is_homotopy_equivalent(const std::vector<ndar
     if (scA != scB)
         return {false, false, "One simply connected, other not"};
     if (scA && scB)
-        return {true, false, "Simply connected + homology iso"};
+        // NOTE (honesty audit): an earlier revision returned conclusive-true
+        // here, stronger than the simplicial overload (which stays
+        // provisional pending cup data the bms form cannot even carry).
+        // Mirror it: equivalent on current evidence, inconclusive overall.
+        return {true, true, "Simply connected + homology iso; provisional (no cup data on bms input)"};
     int dimA = static_cast<int>(bmsA.size()) - 1;
     int dimB = static_cast<int>(bmsB.size()) - 1;
     bool graphA = (dimA <= 1);
@@ -235,7 +298,10 @@ NP_NODISCARD inline HomotopyGroup homotopy_group(const homology::SimplicialCompl
         // Beyond homology range: if aspherical graph, still 0
         if (K.dim() <= 1 && n >= 2)
             return {0, {}, false};
-        return {0, {}, false};
+        // NOTE (honesty audit): an earlier revision returned conclusive 0
+        // here, but e.g. pi_5(S^2) = Z/2 lives beyond any homology range.
+        // Hurewicz does not apply, so this is unknown, not zero.
+        return {0, {}, true};
     }
     if (n == 1)
         return {hg[1].betti, hg[1].torsion, false};
@@ -263,7 +329,7 @@ NP_NODISCARD inline HomotopyGroup homotopy_group(const std::vector<ndarray<int>>
         int dim = static_cast<int>(bms.size()) - 1;
         if (dim <= 1 && n >= 2)
             return {0, {}, false};
-        return {0, {}, false};
+        return {0, {}, true};
     }
     if (n == 1)
         return {hg[1].betti, hg[1].torsion, false};

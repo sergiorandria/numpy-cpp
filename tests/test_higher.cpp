@@ -36,6 +36,19 @@ int main()
         // Poincaré pairing
         auto P = poincare_pairing(S2);
         test::check(P.shape[0] == 1 && P.shape[1] == 1 && P(0, 0) == 1, "poincare S2");
+        // T² pairing must come from the real cup table, not a hardcoded
+        // identity: H¹×H¹ cup is graded-commutative, so the matrix is
+        // skew-symmetric with det ±1 (unimodular). The old hardcoded
+        // diagonal-1 fails the skew check.
+        auto PT = poincare_pairing(T2);
+        bool skew = PT.shape[0] == 2 && PT.shape[1] == 2 && PT(0, 0) == 0 && PT(1, 1) == 0 &&
+                    PT(0, 1) == -PT(1, 0);
+        test::check(skew, "poincare T2 skew");
+        if (skew)
+        {
+            const int det = PT(0, 0) * PT(1, 1) - PT(0, 1) * PT(1, 0);
+            test::check(det == 1 || det == -1, "poincare T2 unimodular");
+        }
 
         // Intersection form CP2: need CP2 simplicial? Use manifold proxy
         auto CP2sim = manifold::ProjectiveManifold("C", 2).to_simplicial();
