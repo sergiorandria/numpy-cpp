@@ -1,6 +1,8 @@
 /**
  * @example neuromorphic_snn.cpp
- * Spiking neural network on Loihi2 / CPU via np::neuromorphic
+ * Spiking neural network via np::neuromorphic software simulation
+ * (CPU harness + per-channel LIF backend). No Loihi/SpiNNaker hardware
+ * involved — see neuromorphic.hpp doc-block.
  */
 #include <iostream>
 #include <np/np.hpp>
@@ -28,14 +30,21 @@ int main()
             ++out_spikes;
     std::cout << "LIF out " << out_spikes << "\n";
 
-    // 3. Backend Strategy (Loihi2 vs CPU)
+    // 3. Backend Strategy (pass-through CPU harness vs real LIF simulation).
+    // The backend IS the LIF pipeline now: same per-channel dynamics as the
+    // manual loop in step 2, driven by event polarity instead of a constant.
     auto cpu = NeuromorphicFactory::cpu();
-    auto loihi = NeuromorphicFactory::loihi();
+    LifSimBackend sim(10.0, 1.0);
     EventBuilder b(10, 10);
-    b.add(0.1, 1, 1).add(0.2, 2, 2);
+    // Three strong excitatory events on (1,1): fires once, on the 3rd.
+    // One weak event on (2,2): below threshold, never fires.
+    b.add(0.1, 1, 1).add(0.2, 1, 1).add(0.3, 1, 1).add(0.15, 2, 2);
     auto ea = b.build();
-    std::cout << cpu->name() << " " << cpu->process(ea).size() << "\n";
-    std::cout << loihi->name() << " " << loihi->process(ea).size() << "\n";
+    std::cout << cpu->name() << " " << cpu->process(ea).size() << " (pass-through echo)\n";
+    auto sim_out = sim.process(ea);
+    std::cout << sim.name() << " " << sim_out.size() << " (simulated spikes)\n";
+    for (auto &ev : sim_out.span())
+        std::cout << "  spike t=" << ev.t << " (" << ev.x << "," << ev.y << ") p=" << ev.p << "\n";
 
     // 4. STDP
     STDP stdp;

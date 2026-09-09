@@ -155,7 +155,7 @@ PYBIND11_MODULE(numpy_cpp, m){
   mpadic.def("valuation", [](const padic::Padic<int64_t>& a){ return a.valuation(); });
   auto mhw = m.def_submodule("hardware", "accelerator/neuromorphic/tensor/mem");
   mhw.def("hbm_migrate", &hbm_wrapper);
-  auto mneuro = mhw.def_submodule("neuromorphic", "Loihi/SpiNNaker");
+  auto mneuro = mhw.def_submodule("neuromorphic", "software LIF simulation (no Loihi/SpiNNaker hardware)");
   mneuro.def("encode_rate", &encode_wrapper);
   auto mtensor = mhw.def_submodule("tensor", "Hopper/AMX");
   mtensor.def("matmul_fp8", &fp8_wrapper);
