@@ -142,7 +142,12 @@ int main()
         auto tot = total_betti_from_einfinity(hopf);
         test::check(tot[0] == 1 && tot[3] == 1, "Hopf total Betti S3");
 
-        auto mv = mayer_vietoris(S1, S1, homology::SimplicialComplex{{{{0}}, {}, {}}}, S1);
+        // Trivial genuine cover (A = B = S1, intersection S1): Euler
+        // chi(U) = chi(A)+chi(B)-chi(A cap B) holds (0 = 0+0-0), so exact.
+        // (An earlier revision passed a single vertex as the intersection —
+        // topologically inconsistent input that the old hardcoded exact=true
+        // could never catch.)
+        auto mv = mayer_vietoris(S1, S1, S1, S1);
         test::check(mv.exact, "MayerVietoris Euler");
 
         auto ah = ahss(S2, "K");
