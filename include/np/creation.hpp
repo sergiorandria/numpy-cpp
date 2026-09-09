@@ -1394,6 +1394,14 @@ NP_API inline auto unravel_index(const ndarray<int> &indices, const std::vector<
 {
     if (dims.empty())
         throw std::invalid_argument("unravel_index: dims empty");
+    // NOTE (honesty audit): an earlier revision multiplied unchecked dims
+    // here, so a negative dim wrapped to a huge size_t and a zero dim later
+    // divided by zero in `rem % dim`.
+    for (int d : dims)
+    {
+        if (d <= 0)
+            throw std::invalid_argument("unravel_index: dims must be positive");
+    }
     std::size_t total = 1;
     for (int d : dims)
         total *= static_cast<std::size_t>(d);
@@ -1439,6 +1447,11 @@ NP_API inline auto ravel_multi_index(const std::vector<ndarray<int>> &indices, c
             throw std::invalid_argument("ravel_multi_index: indices size mismatch");
     if (indices.size() != dims.size())
         throw std::invalid_argument("ravel_multi_index: dims size mismatch");
+    for (int d : dims)
+    {
+        if (d <= 0)
+            throw std::invalid_argument("ravel_multi_index: dims must be positive");
+    }
     ndarray<int> out(std::vector<int>{static_cast<int>(n)});
     for (std::size_t i = 0; i < n; ++i)
     {
@@ -1459,8 +1472,11 @@ NP_API inline auto ravel_multi_index(const std::vector<ndarray<int>> &indices, c
         }
         else // Fortran
         {
+            // NOTE (honesty audit): an earlier revision iterated d from high
+            // to low here, computing reversed C-order instead of Fortran
+            // order (dims=[3,4], idx=[1,2] gave 6, correct is 7).
             int stride = 1;
-            for (int d = static_cast<int>(dims.size()) - 1; d >= 0; --d)
+            for (std::size_t d = 0; d < dims.size(); ++d)
             {
                 int idx = indices[d].data()[indices[d]._flat_logical(i)];
                 if (idx < 0)
