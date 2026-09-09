@@ -49,6 +49,11 @@ namespace np
 
 namespace detail
 {
+// Forward declarations: defined below, used by the npy reader above.
+inline void write_le16(std::ostream &os, uint16_t v);
+inline void write_le32(std::ostream &os, uint32_t v);
+inline uint16_t read_le16(const char *p);
+inline uint32_t read_le32(const char *p);
 inline std::string descr_for_type(const std::string &type_name)
 {
     // Map C++ types to numpy descr strings (little-endian)
@@ -178,20 +183,26 @@ inline std::string read_npy_header(std::istream &is, std::vector<int> &shape_out
     {
         throw std::runtime_error("load: only npy version 1.0/2.0 supported");
     }
-    uint32_t hlen32 = 0;
+    uint32_t hlen = 0;
     if (ver[0] == 1)
     {
-        uint16_t hlen = 0;
-        is.read(reinterpret_cast<char *>(&hlen), 2);
-        hlen32 = hlen;
+        char hb[2] = {0, 0};
+        is.read(hb, 2);
+        if (is.gcount() != 2)
+            throw std::runtime_error("load: truncated header length");
+        hlen = detail::read_le16(hb);
     }
     else
     {
-        is.read(reinterpret_cast<char *>(&hlen32), 4);
+        char hb[4] = {0, 0, 0, 0};
+        is.read(hb, 4);
+        if (is.gcount() != 4)
+            throw std::runtime_error("load: truncated header length");
+        hlen = detail::read_le32(hb);
     }
-    uint32_t hlen = hlen32;
-    // little endian
-    // On big endian machines need swap, but assume little
+    // NOTE (honesty audit): lengths are decoded little-endian explicitly;
+    // the old code read them native-endian ("assume little"), which also
+    // mismatched the v2 writer below on big-endian hosts.
     std::string hdr(hlen, '\0');
     is.read(hdr.data(), hlen);
     if ((std::size_t)is.gcount() != hlen)
@@ -313,14 +324,15 @@ template <typename T> void save(const std::string &filename, const ndarray<T> &a
     if (hdr.size() > 65535)
     {
         detail::write_npy_magic(os, 2, 0);
-        uint32_t hlen = static_cast<uint32_t>(hdr.size());
-        os.write(reinterpret_cast<char *>(&hlen), 4);
+        // NOTE (honesty audit): an earlier revision wrote hlen native-endian
+        // here, producing files no big-endian reader (including NumPy) could
+        // parse. The npy spec mandates little-endian.
+        detail::write_le32(os, static_cast<uint32_t>(hdr.size()));
     }
     else
     {
         detail::write_npy_magic(os, 1, 0);
-        uint16_t hlen = static_cast<uint16_t>(hdr.size());
-        os.write(reinterpret_cast<char *>(&hlen), 2);
+        detail::write_le16(os, static_cast<uint16_t>(hdr.size()));
     }
     os.write(hdr.data(), hdr.size());
     // Write data in C order (logical order)
@@ -362,11 +374,13 @@ template <typename T> auto load(const std::string &filename) -> ndarray<T>
         n = 1; // 0-d
     std::vector<T> data(n);
     is.read(reinterpret_cast<char *>(data.data()), n * sizeof(T));
+    // NOTE (honesty audit): an earlier revision accepted a short read with
+    // gcount() == 0 (e.g. header-only file, zero payload bytes) and returned
+    // uninitialized storage without error. gcount() alone is the signal used
+    // (stream state at exact EOF is not a failure). Any shortfall throws.
     if ((std::size_t)is.gcount() != n * sizeof(T))
     {
-        // Might be truncated; still check
-        if (is.gcount() != 0)
-            throw std::runtime_error("load: truncated data");
+        throw std::runtime_error("load: truncated data");
     }
     if (shape.empty())
         shape = {};
