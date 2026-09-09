@@ -329,29 +329,19 @@ NP_API template <typename T> NP_NODISCARD inline auto getdata(const MaskedArray<
 }
 
 NP_API template <typename T>
-NP_NODISCARD inline auto count(const MaskedArray<T> &a, std::optional<int> axis = std::nullopt) -> std::size_t
+NP_NODISCARD inline auto count_axis(const MaskedArray<T> &a, int axis) -> ndarray<std::size_t>
 {
-    if (!axis.has_value())
-    {
-        return a.count();
-    }
-    // axis-specific count = non-masked along axis
-    int ax = *axis;
+    int ax = axis;
     if (ax < 0)
     {
         ax += static_cast<int>(a.ndim());
     }
     if (ax < 0 || ax >= static_cast<int>(a.ndim()))
     {
-        throw AxisError("count: axis out of bounds");
+        throw AxisError("count_axis: axis out of bounds");
     }
-    // Compute shape after reduction
     std::vector<int> out_shape = a.shape();
     out_shape.erase(out_shape.begin() + ax);
-    if (out_shape.empty())
-    {
-        return a.count();
-    }
     ndarray<std::size_t> out(out_shape, dtype_of<std::size_t>, std::size_t{0});
     np::detail::Odometer od(a.shape());
     while (!od.done())
@@ -372,16 +362,22 @@ NP_NODISCARD inline auto count(const MaskedArray<T> &a, std::optional<int> axis 
         }
         od.advance();
     }
-    // For test simplicity when axis requested but we return scalar sum of counts?
-    // Return total count if caller expects scalar; otherwise still return scalar total
-    // to keep signature simple (size_t). NumPy returns array, but we approximate.
-    std::size_t sum = 0;
-    for (std::size_t i = 0; i < out.size(); ++i)
+    return out;
+}
+
+template <typename T>
+NP_NODISCARD inline auto count(const MaskedArray<T> &a, std::optional<int> axis = std::nullopt) -> std::size_t
+{
+    if (!axis.has_value())
     {
-        sum += out.data()[out._flat_logical(i)];
+        return a.count();
     }
-    (void)out_shape;
-    return sum;
+    // NOTE (honesty audit): an earlier revision computed the per-axis array
+    // above, then threw it away and returned the scalar total. NumPy returns
+    // an array here, which this scalar signature cannot express — so an
+    // explicit axis now throws and points at count_axis() instead of
+    // silently answering a different question.
+    throw std::invalid_argument("count with axis: use count_axis() for per-axis counts");
 }
 
 NP_API template <typename T> NP_NODISCARD inline auto count_masked(const MaskedArray<T> &a) -> std::size_t
@@ -958,22 +954,93 @@ NP_API inline auto mask_rowcols(ndarray<double> &, int) -> void
 }
 NP_API inline auto dot(const MaskedArray<double> &a, const MaskedArray<double> &b) -> MaskedArray<double>
 {
-    // Real: dot on filled data (masked treated as 0) then mask if any row/col masked
-    auto res = ::np::linalg::dot(a.data, b.data);
-    // If either input has any masked, propagate mask as all false for simplicity (real
-    // would be more complex)
-    bool any_masked = false;
-    for (size_t i = 0; i < a.mask.size(); ++i)
-        if (a.mask.data()[a.mask._flat_logical(i)])
-            any_masked = true;
-    for (size_t i = 0; i < b.mask.size(); ++i)
-        if (b.mask.data()[b.mask._flat_logical(i)])
-            any_masked = true;
+    // NOTE (honesty audit): an earlier revision dotted the raw buffers
+    // (masked values contributing fully) and returned an all-false mask.
+    // Masked entries now contribute 0 to the accumulation, and each output
+    // drawing on any masked input is itself masked (NumPy ma.dot rule).
+    auto zero_filled = [](const MaskedArray<double> &m) {
+        ndarray<double> d(m.data.shape);
+        for (std::size_t i = 0; i < m.data.size(); ++i)
+        {
+            d.data()[i] = m.mask.data()[m.mask._flat_logical(i)] ? 0.0 : m.data.data()[m.data._flat_logical(i)];
+        }
+        return d;
+    };
+    auto res = ::np::linalg::dot(zero_filled(a), zero_filled(b));
+    // Contamination (NumPy ma.dot rule): each output is masked if ANY input
+    // element contributing to it is masked. Per linalg::dot's shape cases:
+    // 1D.1D -> scalar: any mask anywhere; 2D.1D -> row-or-any; 1D.2D ->
+    // any-or-column; 2D.2D -> row-or-column. All reads go through get(),
+    // so strided mask views are handled.
+    const auto any = [](const ndarray<bool> &m) {
+        for (std::size_t i = 0; i < m.size(); ++i)
+        {
+            if (m.data()[m._flat_logical(i)])
+            {
+                return true;
+            }
+        }
+        return false;
+    };
+    const auto row_any = [](const ndarray<bool> &m, std::size_t r, std::size_t k) {
+        for (std::size_t j = 0; j < k; ++j)
+        {
+            if (m.get(std::vector<std::size_t>{r, j}))
+            {
+                return true;
+            }
+        }
+        return false;
+    };
+    const auto col_any = [](const ndarray<bool> &m, std::size_t rows, std::size_t c) {
+        for (std::size_t i = 0; i < rows; ++i)
+        {
+            if (m.get(std::vector<std::size_t>{i, c}))
+            {
+                return true;
+            }
+        }
+        return false;
+    };
     ndarray<bool> m(res.shape, dtype::bool_, false);
-    if (any_masked && res.size() > 0)
+    const std::size_t na = a.data.ndim(), nb = b.data.ndim();
+    if (na == 1 && nb == 1)
     {
-        // Mark first element masked as example – real would be per-output mask
-        // Keep simple: no mask for now, just return unmasked
+        m.data()[0] = any(a.mask) || any(b.mask);
+    }
+    else if (na == 2 && nb == 1)
+    {
+        const std::size_t rows = static_cast<std::size_t>(a.data.shape[0]);
+        const std::size_t k = static_cast<std::size_t>(a.data.shape[1]);
+        const bool any_b = any(b.mask);
+        for (std::size_t i = 0; i < rows; ++i)
+        {
+            m.data()[i] = row_any(a.mask, i, k) || any_b;
+        }
+    }
+    else if (na == 1 && nb == 2)
+    {
+        const std::size_t rows = static_cast<std::size_t>(b.data.shape[0]);
+        const std::size_t cols = static_cast<std::size_t>(b.data.shape[1]);
+        const bool any_a = any(a.mask);
+        for (std::size_t j = 0; j < cols; ++j)
+        {
+            m.data()[j] = any_a || col_any(b.mask, rows, j);
+        }
+    }
+    else
+    {
+        const std::size_t rows = static_cast<std::size_t>(a.data.shape[0]);
+        const std::size_t k = static_cast<std::size_t>(a.data.shape[1]);
+        const std::size_t cols = static_cast<std::size_t>(b.data.shape[1]);
+        for (std::size_t i = 0; i < rows; ++i)
+        {
+            const bool ra = row_any(a.mask, i, k);
+            for (std::size_t j = 0; j < cols; ++j)
+            {
+                m.data()[i * cols + j] = ra || col_any(b.mask, k, j);
+            }
+        }
     }
     return MaskedArray<double>(res, m);
 }
@@ -1392,14 +1459,30 @@ NP_NODISCARD inline auto take(const MaskedArray<T> &a, const ndarray<std::size_t
 NP_API template <typename T>
 inline auto put(MaskedArray<T> &a, const ndarray<std::size_t> &indices, const ndarray<T> &values) -> void
 {
+    if (a.size() == 0)
+    {
+        if (indices.size() == 0)
+        {
+            return;
+        }
+        throw std::invalid_argument("put: indices into empty array");
+    }
+    if (a.data.shape != a.mask.shape)
+    {
+        throw std::invalid_argument("put: data/mask shape mismatch");
+    }
     for (std::size_t i = 0; i < indices.size(); ++i)
     {
-        if (a.hard_mask && a.mask.data()[a.mask._flat_logical(0)])
+        std::size_t dst = indices.data()[indices._flat_logical(i)] % a.size();
+        // NOTE (honesty audit): an earlier revision tested the mask at flat
+        // index 0 here, so one masked element-0 froze the whole array while
+        // any other masked destination stayed writable. The hard-mask guard
+        // must consult the destination element.
+        if (a.hard_mask && a.mask.data()[a.mask._flat_logical(dst)])
         {
             continue;
         }
-        std::size_t dst = indices.data()[indices._flat_logical(i)] % a.size();
-        T v = values.data()[values._flat_logical(i % values.size())];
+        T v = values.size() == 0 ? T{} : values.data()[values._flat_logical(i % values.size())];
         a.data.data()[a.data._flat_logical(dst)] = v;
         if (!a.hard_mask)
         {

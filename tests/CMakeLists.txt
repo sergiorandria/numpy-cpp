@@ -37,6 +37,7 @@ set(NP_TESTS
     test_quantum
     test_accelerator
     test_io
+    test_masked_array
     test_polynomial
     test_sorting
     test_bitwise
