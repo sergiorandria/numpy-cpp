@@ -5,6 +5,7 @@
 #include <atomic>
 #include <chrono>
 #include <numeric>
+#include <stdexcept>
 #include <vector>
 
 #include "np/threadpool.hpp"
@@ -92,6 +93,52 @@ int main()
         auto s = q.steal();
         test::check(s && *s == 1, "steal FIFO");
         test::check(q.empty(), "empty after pop/steal");
+    }
+
+    // wait() observes in-flight tasks, not just empty queues: enqueue slow
+    // tasks that sleep while already popped, then wait() must see all of
+    // them done (the old queues-empty-only wait could return early).
+    {
+        np::ThreadPool pool(4);
+        std::atomic<int> done{0};
+        const int tasks = 16;
+        for (int i = 0; i < tasks; ++i)
+        {
+            pool.enqueue([&done] {
+                std::this_thread::sleep_for(std::chrono::milliseconds(20));
+                done.fetch_add(1, std::memory_order_relaxed);
+            });
+        }
+        pool.wait();
+        test::check(done.load() == tasks, "wait sees in-flight tasks");
+    }
+
+    // parallel_for propagates chunk exceptions instead of hanging.
+    {
+        np::ThreadPool pool(4);
+        bool threw = false;
+        try
+        {
+            pool.parallel_for(0, 1000, [](std::size_t i) {
+                if (i == 500)
+                    throw std::runtime_error("boom");
+            });
+        }
+        catch (const std::runtime_error &)
+        {
+            threw = true;
+        }
+        test::check(threw, "parallel_for rethrows");
+    }
+
+    // A throwing fire-and-forget task is suppressed, pool stays usable.
+    {
+        np::ThreadPool pool(2);
+        pool.enqueue([] { throw std::runtime_error("bg boom"); });
+        auto fut = pool.submit([] { return 7; });
+        test::check(fut.get() == 7, "pool usable after throw");
+        pool.wait();
+        test::check(true, "wait after throw");
     }
 
     return test::failures() ? 1 : 0;

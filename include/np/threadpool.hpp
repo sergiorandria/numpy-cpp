@@ -639,6 +639,10 @@ class ThreadPool
         std::vector<std::unique_ptr<detail::WorkStealingDeque<Task>>> queues;
         std::atomic<bool> done{false};
         std::atomic<std::size_t> next_queue{0};
+        // Tasks popped from a queue but still executing. wait() must observe
+        // both empty queues AND zero in-flight tasks; queue emptiness alone
+        // can return while a stolen task is still running.
+        std::atomic<std::size_t> in_flight{0};
         std::mutex cv_m;
         std::condition_variable cv;
     };
@@ -775,6 +779,11 @@ class ThreadPool
 
     NP_HIDDEN static void __np_wait_mutex(ThreadPool *self)
     {
+        // NOTE (honesty audit): an earlier revision broke on queues-empty
+        // alone, which can return while a popped task is still executing.
+        // The in_flight counter (bumped around every (*job)() execution,
+        // including parallel_for caller-help) closes that race; the old
+        // trailing sleep(1ms) that papered over it is gone.
         while (true)
         {
             bool empty = true;
@@ -786,13 +795,12 @@ class ThreadPool
                     break;
                 }
             }
-            if (empty)
+            if (empty && self->__np_impl->in_flight.load(std::memory_order_acquire) == 0)
             {
                 break;
             }
             std::this_thread::yield();
         }
-        std::this_thread::sleep_for(std::chrono::milliseconds(1));
     }
 
     NP_HIDDEN static void __np_wait_lockfree(ThreadPool *self)
@@ -878,6 +886,7 @@ class ThreadPool
             }
             if (job)
             {
+                self->__np_impl->in_flight.fetch_add(1, std::memory_order_acq_rel);
                 try
                 {
                     (*job)();
@@ -887,6 +896,7 @@ class ThreadPool
 
                     std::cerr << "[ThreadPool] task threw unknown exception (suppressed)\n";
                 }
+                self->__np_impl->in_flight.fetch_sub(1, std::memory_order_acq_rel);
                 continue;
             }
             for (int s = 0; s < kSpinIters; ++s)
@@ -912,6 +922,7 @@ class ThreadPool
             }
             if (job)
             {
+                self->__np_impl->in_flight.fetch_add(1, std::memory_order_acq_rel);
                 try
                 {
                     (*job)();
@@ -921,6 +932,7 @@ class ThreadPool
 
                     std::cerr << "[ThreadPool] task threw unknown exception (suppressed)\n";
                 }
+                self->__np_impl->in_flight.fetch_sub(1, std::memory_order_acq_rel);
                 continue;
             }
             std::unique_lock<std::mutex> lk(self->__np_impl->cv_m);
@@ -998,7 +1010,22 @@ class ThreadPool
         {
             if (auto job = __np_try_steal_any_ptr(this))
             {
-                (*job)();
+                // Count caller-helped tasks too: a concurrent wait() must
+                // not return while this thread is inside (*job)().
+                __np_impl->in_flight.fetch_add(1, std::memory_order_acq_rel);
+                try
+                {
+                    (*job)();
+                }
+                catch (...)
+                {
+                    // Foreign (non-parallel_for) task: same policy as the
+                    // worker loop — suppress so the wait loop below still
+                    // terminates. parallel_for's own chunks never throw
+                    // here (they capture into first_exception).
+                    std::cerr << "[ThreadPool] task threw unknown exception (suppressed)\n";
+                }
+                __np_impl->in_flight.fetch_sub(1, std::memory_order_acq_rel);
             }
             else
             {
