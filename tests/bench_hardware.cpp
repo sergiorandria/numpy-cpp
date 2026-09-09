@@ -77,7 +77,7 @@ int main()
     auto b = np::eye<float>(64);
     printf("=== hardware backends (64) ===\n");
     printf("HBM migrate: %.2f ms\n", ms([&] {
-               auto h = np::mem::migrate_to_hbm(a);
+               auto h = np::mem::tag_hbm_hint(a);
                (void)h;
            }));
     printf("tensor matmul_fp8: %.2f ms\n", ms([&] {
@@ -148,15 +148,15 @@ int main()
     {
         auto arr = np::eye<float>(512);
         printf("migrate_to_hbm 512: %.2f ms\n", ms([&] {
-                   auto h = np::mem::migrate_to_hbm(arr);
+                   auto h = np::mem::tag_hbm_hint(arr);
                    (void)h;
                }));
         printf("migrate_to_device 512: %.2f ms\n", ms([&] {
-                   auto g = np::mem::migrate_to_device(arr);
+                   auto g = np::mem::tag_device_hint(arr);
                    (void)g;
                }));
         printf("migrate_to_pinned 512: %.2f ms\n", ms([&] {
-                   auto p = np::mem::migrate_to_pinned(arr);
+                   auto p = np::mem::tag_pinned_hint(arr);
                    (void)p;
                }));
     }

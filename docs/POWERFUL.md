@@ -31,7 +31,7 @@ cmake -S . -B build -DNP_ENABLE_AVX2=ON -DNP_ENABLE_GPU=ON -DNP_ENABLE_OPENMP=ON
 | **linalg GEMM** | `gpu::try_matmul` (OpenMP target / CUDA driver `dlopen`) for `M*N*K > tune::gpu_threshold()` (1M → 4M on 32+ threads), else `gpu::cpu_matmul` blocked `tune::optimal_block` (128 f32 / 96 f64 for 12 MiB L3, AVX2 `FMA` 8-wide, `madvise HUGEPAGE`) | ThreadPool `parallel_for` >4096, scalar triple loop |
 | **GPU abstraction** `gpu.hpp` | `dlopen libcuda.so.1` `cuInit` + `omp_get_num_devices()` probe, `try_matmul` OpenMP `target teams distribute parallel for collapse(2)`, pinned `cudaMallocHost` / `aligned_alloc 64` | CPU blocked |
 | **Accelerator** | `GPUAccelerator` → `gpu::matmul`, `AutoAccelerator` micro-benchmarks 128² | CPU |
-| **Tensor** | `HopperBackend` → `gpu::try_matmul` (>1M), `AMXBackend` → `gpu::cpu_matmul` | `linalg::matmul` |
+| **Tensor** | `GpuFp32Backend` → `gpu::try_matmul` (>1M), `CpuBlockedBackend` → `gpu::cpu_matmul` | `linalg::matmul` |
 | **Memory** | `GpuArray`/`PinnedArray` (`madvise HUGEPAGE`), `migrate_to_device/pinned`, `HBMArray` | `Host` |
 | **Tune** `powerful.hpp` | `l3_cache_bytes()` via `sysconf`, `optimal_block_f32()` (`sqrt(L3/24)`), `gpu_threshold_flops()` (1M/2M/4M by threads) | static 32 |
 

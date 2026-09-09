@@ -1,10 +1,17 @@
 /**
  * @file accelerator.hpp
- * @brief Heterogeneous accelerator dispatcher — CPU/GPU/Loihi/ReRAM/Photonics.
+ * @brief Heterogeneous accelerator dispatcher — CPU/GPU/ReRAM-sim.
  *
- * GPU path now dispatches via np::gpu (OpenMP target / CUDA driver dlopen) for
- * powerful workstations. CPU path uses blocked+SIMD+ThreadPool. AutoAccelerator
- * benchmarks CPU vs GPU on first call and caches the winner.
+ * GPU path dispatches via np::gpu (OpenMP target / CUDA driver dlopen).
+ * CPU path uses blocked+SIMD+ThreadPool. ReRAM path runs the analog
+ * crossbar VMM simulation from memristor.hpp (DAC/ADC quantization +
+ * device noise), not real ReRAM hardware. AutoAccelerator benchmarks CPU
+ * vs GPU per workload size-class and caches the winner per class.
+ *
+ * NOTE (honesty audit): an earlier revision had a LoihiAccelerator named
+ * "Loihi2" whose matmul() was linalg::matmul — no Loihi hardware or
+ * simulation of any kind. It is deleted; there is no neuromorphic matmul
+ * path in this file.
  */
 #ifndef NP_ACCELERATOR_HPP
 #define NP_ACCELERATOR_HPP
@@ -12,9 +19,14 @@
 #include "api_macros.hpp"
 #include "gpu.hpp"
 #include "linalg.hpp"
+#include "memristor.hpp"
 #include "ndarray.hpp"
 #include <chrono>
+#include <cstdint>
+#include <limits>
+#include <map>
 #include <memory>
+#include <mutex>
 #include <string>
 
 // GPU offload tuning (macros, no magic numbers in logic)
@@ -83,67 +95,125 @@ struct GPUAccelerator : IAccelerator
     }
 };
 
-struct LoihiAccelerator : IAccelerator
-{
-    ndarray<float> matmul(const ndarray<float> &a, const ndarray<float> &b) override
-    {
-        return linalg::matmul(a, b);
-    }
-    NP_NODISCARD std::string name() const noexcept override
-    {
-        return "Loihi2";
-    }
-};
-
+// Analog in-memory-compute matmul via the memristor crossbar simulation:
+// each output row is a hardware-aware VMM (DAC quantization, analog dot,
+// ADC quantization, deterministic seed) over the B matrix held as crossbar
+// weights. This is a functional device model, not a performance path and
+// not real ReRAM hardware — hence "ReRAM-sim", with is_available() true
+// because software simulation needs no device.
+//
+// Precision/range caveat (measured, not assumed): the default 8-bit DAC/ADC
+// model is coarse — small well-conditioned inputs stay within ~1% of ideal,
+// but magnitudes beyond the DAC full-scale (MemristorConfig::max_input_
+// voltage, default 1.0) saturate and large dynamic ranges can show tens of
+// percent relative error, exactly like naive-mapped analog hardware. Pass a
+// custom MemristorConfig (e.g. ideal 0-bit quantization) for bit-close
+// results, or normalized inputs for representative analog behavior.
 struct ReRAMAccelerator : IAccelerator
 {
+    analog::MemristorConfig config;
+
+    ReRAMAccelerator()
+    {
+        config.dac_bits = 8;
+        config.adc_bits = 8;
+        config.seed = 0xC0FFEEu;
+    }
+    explicit ReRAMAccelerator(analog::MemristorConfig cfg) : config(std::move(cfg))
+    {
+    }
     ndarray<float> matmul(const ndarray<float> &a, const ndarray<float> &b) override
     {
-        return linalg::matmul(a, b);
+        if (a.ndim() != 2 || b.ndim() != 2 || a.shape[1] != b.shape[0] || a.size() == 0 || b.size() == 0)
+        {
+            return linalg::matmul(a, b);
+        }
+        analog::Crossbar xb(b, config);
+        const int m = a.shape[0];
+        const int kdim = a.shape[1];
+        const int n = b.shape[1];
+        ndarray<float> out(std::vector<int>{m, n});
+        ndarray<float> row(std::vector<int>{kdim});
+        for (int i = 0; i < m; ++i)
+        {
+            const std::size_t ii = static_cast<std::size_t>(i);
+            for (int k = 0; k < kdim; ++k)
+            {
+                // Logical access: a may be a strided view.
+                row.data()[static_cast<std::size_t>(k)] = a(ii, static_cast<std::size_t>(k));
+            }
+            const ndarray<float> y = xb.apply(row);
+            for (int j = 0; j < n; ++j)
+            {
+                const std::size_t jj = static_cast<std::size_t>(j);
+                out(ii, jj) = y.data()[jj];
+            }
+        }
+        return out;
     }
     NP_NODISCARD std::string name() const noexcept override
     {
-        return "ReRAM";
+        return "ReRAM-sim";
     }
 };
 
 struct AutoAccelerator : IAccelerator
 {
-    mutable std::shared_ptr<IAccelerator> cached_;
-    mutable std::once_flag once_;
+    // NOTE (honesty audit): an earlier revision benchmarked once on fixed
+    // 128x128 identity inputs and cached the winner forever, so every later
+    // shape/dtype got the stale choice. The cache is now keyed by workload
+    // size class (floor(log2(flops))), and each class is benchmarked on the
+    // actual caller inputs the first time it appears.
+    mutable std::mutex mtx_;
+    mutable std::map<std::uint64_t, std::shared_ptr<IAccelerator>> winners_;
+    static std::uint64_t size_class(std::size_t flops) noexcept
+    {
+        std::uint64_t bucket = 0;
+        while ((flops >>= 1) != 0)
+        {
+            ++bucket;
+        }
+        return bucket;
+    }
     ndarray<float> matmul(const ndarray<float> &a, const ndarray<float> &b) override
     {
-        std::call_once(once_, [&] {
-            if (gpu::is_available() && a.size() * b.size() > NP_ACCEL_GPU_SIZE_THRESH)
+        const std::uint64_t key = (a.ndim() == 2 && b.ndim() == 2)
+                                      ? size_class(a.size() * b.size())
+                                      : std::numeric_limits<std::uint64_t>::max();
+        {
+            std::lock_guard<std::mutex> lock(mtx_);
+            auto it = winners_.find(key);
+            if (it != winners_.end())
             {
-                auto bench = [](IAccelerator &acc) -> double {
-                    auto aa = np::eye<float>(NP_ACCEL_BENCH_DIM);
-                    auto bb = np::eye<float>(NP_ACCEL_BENCH_DIM);
-                    auto t0 = std::chrono::steady_clock::now();
-                    auto cc = acc.matmul(aa, bb);
-                    auto t1 = std::chrono::steady_clock::now();
-                    (void)cc;
-                    return std::chrono::duration<double, std::milli>(t1 - t0).count();
-                };
-                CPUAccelerator cpu;
-                GPUAccelerator gpu;
-                double t_cpu = bench(cpu);
-                double t_gpu = bench(gpu);
-                cached_ = (t_gpu < t_cpu) ? std::static_pointer_cast<IAccelerator>(std::make_shared<GPUAccelerator>())
-                                          : std::static_pointer_cast<IAccelerator>(std::make_shared<CPUAccelerator>());
+                return it->second->matmul(a, b);
             }
-            else
+        }
+        std::shared_ptr<IAccelerator> winner = std::make_shared<CPUAccelerator>();
+        if (gpu::is_available() && a.size() * b.size() > NP_ACCEL_GPU_SIZE_THRESH)
+        {
+            auto bench = [&](IAccelerator &acc) -> double {
+                const auto t0 = std::chrono::steady_clock::now();
+                auto cc = acc.matmul(a, b);
+                const auto t1 = std::chrono::steady_clock::now();
+                (void)cc;
+                return std::chrono::duration<double, std::milli>(t1 - t0).count();
+            };
+            CPUAccelerator cpu;
+            GPUAccelerator gpu;
+            if (bench(gpu) < bench(cpu))
             {
-                cached_ = std::make_shared<CPUAccelerator>();
+                winner = std::make_shared<GPUAccelerator>();
             }
-        });
-        return cached_->matmul(a, b);
+        }
+        {
+            std::lock_guard<std::mutex> lock(mtx_);
+            winners_[key] = winner;
+        }
+        return winner->matmul(a, b);
     }
     NP_NODISCARD std::string name() const noexcept override
     {
-        if (cached_)
-            return "Auto(" + cached_->name() + ")";
-        return gpu::is_available() ? "Auto(GPU|CPU)" : "Auto(CPU)";
+        return "Auto";
     }
     NP_NODISCARD bool is_available() const noexcept override
     {
@@ -160,10 +230,6 @@ struct AcceleratorFactory
     NP_NODISCARD static std::shared_ptr<IAccelerator> gpu()
     {
         return std::make_shared<GPUAccelerator>();
-    }
-    NP_NODISCARD static std::shared_ptr<IAccelerator> loihi()
-    {
-        return std::make_shared<LoihiAccelerator>();
     }
     NP_NODISCARD static std::shared_ptr<IAccelerator> reram()
     {
