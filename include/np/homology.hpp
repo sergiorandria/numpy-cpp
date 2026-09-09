@@ -4,16 +4,14 @@
  *
  * Provides header-only, exact-integer homology for finite simplicial complexes:
  *   - `SimplicialComplex` (by-dimension simplex lists + boundary matrices)
- *   - `smith_normal_form` (exact over Z via `np::bigint`, Bareiss + minors)
+ *   - `smith_normal_form` (exact over Z via `np::bigint`, Kannan–Bachem)
  *   - `betti_numbers`, `homology_groups`, `euler_characteristic`
  *   - `simplicial_homology` convenience
  *
- * SNF is exact for 1×1/2×2 via gcd and for general matrices via
- * gcd-of-minors (Cohen) with Bareiss determinants. For large matrices
- * (>2M minors) it falls back to exact rank with invariant factors 1
- * (totally unimodular boundary case). Rank is exact via Bareiss,
- * not double SVD, so `betti_d = n_d - rank(d_d) - rank(d_{d+1})` is
- * exact over Q.
+ * SNF diagonalization is polynomial (Bezout row/column operations with a
+ * divisibility fixup); there is no minors enumeration and no size cap.
+ * Rank is exact via Bareiss, not double SVD, so
+ * `betti_d = n_d - rank(d_d) - rank(d_{d+1})` is exact over Q.
  *
  * Reference: Hatcher, *Algebraic Topology* Ch.2; Munkres, *Elements of Algebraic
  * Topology*; Cohen, *A Course in Computational Algebraic Number Theory* (SNF).
@@ -36,11 +34,6 @@
 #include "api_macros.hpp"
 #include "bigint.hpp"
 #include "ndarray.hpp"
-
-// Smith normal form tuning (macros, no magic numbers in logic)
-#define NP_HOMOLOGY_SNF_COMB_LIMIT 100000
-#define NP_HOMOLOGY_SNF_MINORS_LIMIT 2000000
-#define NP_HOMOLOGY_SNF_BINOM_CAP 5000000LL
 
 namespace np::homology
 {
@@ -254,80 +247,213 @@ NP_NODISCARD inline int exact_rank_bigint(const ndarray<bigint> &A)
     return bareiss_rank(std::move(M));
 }
 
-NP_NODISCARD inline long long binom_ll(int n, int k)
+// ── Kannan–Bachem Smith normal form (diagonal only, polynomial) ─────────
+
+/// Extended gcd: g = s*a + t*b with g >= 0.
+struct EgcdResult
 {
-    if (k < 0 || k > n)
-        return 0;
-    if (k > n - k)
-        k = n - k;
-    long long res = 1;
-    for (int i = 0; i < k; ++i)
+    bigint g{0};
+    bigint s{0};
+    bigint t{0};
+};
+
+NP_NODISCARD inline EgcdResult egcd(bigint a, bigint b)
+{
+    const int sa = (a < 0) ? -1 : 1;
+    const int sb = (b < 0) ? -1 : 1;
+    bigint aa = (sa < 0) ? -a : a;
+    bigint bb = (sb < 0) ? -b : b;
+    bigint x0 = 1, x1 = 0, y0 = 0, y1 = 1;
+    while (bb != 0)
     {
-        res = res * (n - i) / (i + 1);
-        if (res > NP_HOMOLOGY_SNF_BINOM_CAP)
-            return res; // cap
+        const bigint q = aa / bb;
+        const bigint r = aa % bb;
+        aa = bb;
+        bb = r;
+        const bigint tx = x0 - q * x1;
+        x0 = x1;
+        x1 = tx;
+        const bigint ty = y0 - q * y1;
+        y0 = y1;
+        y1 = ty;
     }
-    return res;
+    return {aa, x0 * sa, y0 * sb};
 }
 
-// Enumerate k-combinations of {0..n-1} invoking fn(comb)
-template <typename Fn> inline void for_each_combination(int n, int k, Fn fn)
+/**
+ * @brief SNF diagonal of an m×n integer matrix (Kannan–Bachem style).
+ *
+ * Diagonalizes with unimodular Bezout row/column operations, then enforces
+ * d[i] | d[i+1] by folding offending rows back into the pivot (each fold
+ * strictly decreases |pivot|, so the loop terminates). Polynomial in the
+ * matrix size; intermediate growth stays modest for boundary-size inputs.
+ */
+NP_NODISCARD inline std::vector<bigint> snf_diagonal_kb(std::vector<std::vector<bigint>> B, int m, int n)
 {
-    if (k < 0 || k > n)
-        return;
-    std::vector<int> c(k);
-    std::iota(c.begin(), c.end(), 0);
-    while (true)
+    const int K = std::min(m, n);
+    std::vector<bigint> diag(K, bigint(0));
+    if (K <= 0)
     {
-        fn(c);
-        int i = k - 1;
-        while (i >= 0 && c[i] == n - k + i)
-            --i;
-        if (i < 0)
-            break;
-        ++c[i];
-        for (int j = i + 1; j < k; ++j)
-            c[j] = c[j - 1] + 1;
+        return diag;
     }
-}
-
-NP_NODISCARD inline bigint gcd_of_k_minors(const ndarray<bigint> &A, int k)
-{
-    int m = A.shape[0], n = A.shape[1];
-    if (k <= 0)
-        return bigint(1);
-    if (k > m || k > n)
-        return bigint(0);
-    bigint g = 0;
-    bool first = true;
-    // early exit if g becomes 1
-    for_each_combination(m, k, [&](const std::vector<int> &rows) {
-        if (!first && g == 1)
+    // Fold row j into pivot row i (column c): pivot becomes gcd, B[j][c] = 0.
+    // Shear when divisible (exact, never dirties the pivot row); Bezout
+    // otherwise (fires only for x%p != 0, so |pivot| strictly decreases).
+    const auto row_fold = [&](int i, int j, int c) {
+        const bigint p = B[i][c];
+        const bigint x = B[j][c];
+        if (x == 0)
+        {
             return;
-        for_each_combination(n, k, [&](const std::vector<int> &cols) {
-            if (g == 1)
-                return;
-            std::vector<std::vector<bigint>> sub(k, std::vector<bigint>(k));
-            for (int i = 0; i < k; ++i)
-                for (int j = 0; j < k; ++j)
-                    sub[i][j] = A(rows[i], cols[j]);
-            bigint d = bareiss_determinant(sub);
-            d = bigint_abs(d);
-            if (d == 0)
-                return;
-            if (first)
+        }
+        if (p != 0 && x % p == 0)
+        {
+            const bigint q = x / p;
+            for (int k = c; k < n; ++k)
             {
-                g = d;
-                first = false;
+                B[j][k] -= q * B[i][k];
             }
-            else
-                g = bigint_gcd(g, d);
-        });
-    });
-    if (first)
-        return bigint(0); // all zero
-    return g;
+            return;
+        }
+        const auto e = egcd(p, x);
+        const bigint pg = p / e.g;
+        const bigint xg = x / e.g;
+        for (int k = c; k < n; ++k)
+        {
+            const bigint ri = B[i][k];
+            const bigint rj = B[j][k];
+            B[i][k] = e.s * ri + e.t * rj;
+            B[j][k] = pg * rj - xg * ri;
+        }
+    };
+    // Fold column j into pivot column i (row r): symmetric to row_fold.
+    const auto col_fold = [&](int r, int i, int j) {
+        const bigint p = B[r][i];
+        const bigint x = B[r][j];
+        if (x == 0)
+        {
+            return;
+        }
+        if (p != 0 && x % p == 0)
+        {
+            const bigint q = x / p;
+            for (int k = r; k < m; ++k)
+            {
+                B[k][j] -= q * B[k][i];
+            }
+            return;
+        }
+        const auto e = egcd(p, x);
+        const bigint pg = p / e.g;
+        const bigint xg = x / e.g;
+        for (int k = r; k < m; ++k)
+        {
+            const bigint ci = B[k][i];
+            const bigint cj = B[k][j];
+            B[k][i] = e.s * ci + e.t * cj;
+            B[k][j] = pg * cj - xg * ci;
+        }
+    };
+    for (int i = 0; i < K; ++i)
+    {
+        while (true)
+        {
+            // Pivot search in the submatrix.
+            int pr = -1, pc = -1;
+            for (int r = i; r < m && pr < 0; ++r)
+            {
+                for (int c = i; c < n; ++c)
+                {
+                    if (B[r][c] != 0)
+                    {
+                        pr = r;
+                        pc = c;
+                        break;
+                    }
+                }
+            }
+            if (pr < 0)
+            {
+                return diag; // rest is zero
+            }
+            if (pr != i)
+            {
+                std::swap(B[pr], B[i]);
+            }
+            if (pc != i)
+            {
+                for (int r = 0; r < m; ++r)
+                {
+                    std::swap(B[r][pc], B[r][i]);
+                }
+            }
+            if (B[i][i] < 0)
+            {
+                for (int k = i; k < n; ++k)
+                {
+                    B[i][k] = -B[i][k];
+                }
+            }
+            for (int j = i + 1; j < m; ++j)
+            {
+                row_fold(i, j, i);
+            }
+            for (int k = i + 1; k < n; ++k)
+            {
+                col_fold(i, i, k);
+            }
+            // Pivot row/column clean?
+            bool clean = true;
+            for (int j = i + 1; j < m && clean; ++j)
+            {
+                clean = (B[j][i] == 0);
+            }
+            for (int k = i + 1; k < n && clean; ++k)
+            {
+                clean = (B[i][k] == 0);
+            }
+            if (!clean)
+            {
+                continue;
+            }
+            if (B[i][i] == 0)
+            {
+                continue; // empty cross; re-pivot from the submatrix
+            }
+            // Divisibility over the strict submatrix.
+            const bigint piv = B[i][i] < 0 ? -B[i][i] : B[i][i];
+            int fr = -1, fk = -1;
+            for (int r = i + 1; r < m && fr < 0; ++r)
+            {
+                for (int k = i + 1; k < n; ++k)
+                {
+                    if (B[r][k] % piv != 0)
+                    {
+                        fr = r;
+                        fk = k;
+                        break;
+                    }
+                }
+            }
+            if (fr < 0)
+            {
+                break;
+            }
+            // Fold the offending row into the pivot row; the pivot becomes
+            // gcd(pivot, B[fr][fk]), a proper divisor, so this terminates.
+            (void)fk;
+            for (int k = i; k < n; ++k)
+            {
+                B[i][k] += B[fr][k];
+            }
+        }
+        diag[i] = B[i][i] < 0 ? -B[i][i] : B[i][i];
+    }
+    return diag;
 }
+
+// Minors machinery removed: Kannan–Bachem above is polynomial, so the
+// exponential gcd-of-minors path (and its binom caps) is no longer needed.
 
 } // namespace detail
 
@@ -337,10 +463,9 @@ NP_NODISCARD inline bigint gcd_of_k_minors(const ndarray<bigint> &A, int k)
  * @brief Smith normal form diagonal for integer matrix `A` (m×n).
  *
  * Returns sorted invariant factors `diag` of length `min(m,n)` where
- * `diag[i] | diag[i+1]` and zeros for rank deficiency. Exact via
- * gcd-of-minors (Bareiss) up to ~2M minors; beyond that falls back to
- * exact rank with 1's (boundary matrices are totally unimodular in that
- * regime). 1×1 and 2×2 are handled directly.
+ * `diag[i] | diag[i+1]` and zeros for rank deficiency. Exact and
+ * polynomial via Kannan–Bachem diagonalization (no minors enumeration,
+ * no size caps). 1×1 and 2×2 are handled directly.
  *
  * Reference: https://en.wikipedia.org/wiki/Smith_normal_form
  */
@@ -375,53 +500,15 @@ NP_NODISCARD inline std::vector<bigint> smith_normal_form(const ndarray<int> &A)
             std::swap(diag[0], diag[1]);
         return diag;
     }
-    // General: gcd of minors
-    // Estimate total minors
-    long long total_est = 0;
-    bool too_large = false;
-    for (int k = 1; k <= K; ++k)
+    std::vector<std::vector<bigint>> M(m, std::vector<bigint>(n));
+    for (int i = 0; i < m; ++i)
     {
-        long long cr = detail::binom_ll(m, k);
-        long long cc = detail::binom_ll(n, k);
-        if (cr > NP_HOMOLOGY_SNF_COMB_LIMIT || cc > NP_HOMOLOGY_SNF_COMB_LIMIT)
+        for (int j = 0; j < n; ++j)
         {
-            too_large = true;
-            break;
-        }
-        long long tot = cr * cc;
-        if (tot > NP_HOMOLOGY_SNF_MINORS_LIMIT)
-        {
-            too_large = true;
-            break;
-        }
-        total_est += tot;
-        if (total_est > NP_HOMOLOGY_SNF_MINORS_LIMIT)
-        {
-            too_large = true;
-            break;
+            M[i][j] = Ab(i, j);
         }
     }
-    if (too_large)
-    {
-        int r = detail::exact_rank_bigint(Ab);
-        for (int i = 0; i < r && i < K; ++i)
-            diag[i] = bigint(1);
-        return diag;
-    }
-    bigint g_prev = 1;
-    for (int k = 1; k <= K; ++k)
-    {
-        bigint gk = detail::gcd_of_k_minors(Ab, k);
-        if (gk == 0)
-            break; // rank < k
-        diag[k - 1] = gk / g_prev;
-        g_prev = gk;
-    }
-    // Ensure divisibility and sort (already sorted by construction)
-    for (auto &v : diag)
-        if (v < 0)
-            v = -v;
-    return diag;
+    return detail::snf_diagonal_kb(std::move(M), m, n);
 }
 
 NP_NODISCARD inline std::vector<bigint> smith_normal_form(const ndarray<bigint> &A)
@@ -452,50 +539,15 @@ NP_NODISCARD inline std::vector<bigint> smith_normal_form(const ndarray<bigint> 
             diag[1] = bigint_abs(det) / diag[0];
         return diag;
     }
-    long long total_est = 0;
-    bool too_large = false;
-    for (int k = 1; k <= K; ++k)
+    std::vector<std::vector<bigint>> M(m, std::vector<bigint>(n));
+    for (int i = 0; i < m; ++i)
     {
-        long long cr = detail::binom_ll(m, k);
-        long long cc = detail::binom_ll(n, k);
-        if (cr > NP_HOMOLOGY_SNF_COMB_LIMIT || cc > NP_HOMOLOGY_SNF_COMB_LIMIT)
+        for (int j = 0; j < n; ++j)
         {
-            too_large = true;
-            break;
-        }
-        long long tot = cr * cc;
-        if (tot > NP_HOMOLOGY_SNF_MINORS_LIMIT)
-        {
-            too_large = true;
-            break;
-        }
-        total_est += tot;
-        if (total_est > NP_HOMOLOGY_SNF_MINORS_LIMIT)
-        {
-            too_large = true;
-            break;
+            M[i][j] = A(i, j);
         }
     }
-    if (too_large)
-    {
-        int r = detail::exact_rank_bigint(A);
-        for (int i = 0; i < r && i < K; ++i)
-            diag[i] = bigint(1);
-        return diag;
-    }
-    bigint g_prev = 1;
-    for (int k = 1; k <= K; ++k)
-    {
-        bigint gk = detail::gcd_of_k_minors(A, k);
-        if (gk == 0)
-            break;
-        diag[k - 1] = gk / g_prev;
-        g_prev = gk;
-    }
-    for (auto &v : diag)
-        if (v < 0)
-            v = -v;
-    return diag;
+    return detail::snf_diagonal_kb(std::move(M), m, n);
 }
 
 // ── Betti numbers & homology ────────────────────────────────────────────
@@ -555,8 +607,11 @@ NP_NODISCARD inline std::vector<int> betti_numbers(const std::vector<ndarray<int
         int rd = (d <= D) ? rank[d] : 0;
         int rd1 = (d + 1 <= D) ? rank[d + 1] : 0;
         betti[d] = n[d] - rd - rd1;
+        // NOTE (honesty audit): an earlier revision clamped negatives to 0,
+        // silently masking malformed complexes (d²≠0). Negative Betti is
+        // impossible for valid input, so this now throws loudly.
         if (betti[d] < 0)
-            betti[d] = 0;
+            throw std::invalid_argument("betti_numbers: negative Betti (complex violates d^2=0?)");
     }
     return betti;
 }
