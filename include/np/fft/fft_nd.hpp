@@ -96,6 +96,13 @@ NP_NODISCARD NdPlan cook_nd(const ndarray<T> &x, const std::optional<std::vector
             {
                 lens.push_back(static_cast<std::size_t>(x.shape[ax[i]]));
             }
+            else if (v <= 0)
+            {
+                // NOTE (honesty audit): s={-2} used to wrap to SIZE_MAX-1
+                // through the unsigned cast below and march toward a doomed
+                // giant allocation. NumPy raises ValueError; so do we.
+                throw std::invalid_argument("FFT length must be positive or -1");
+            }
             else
             {
                 lens.push_back(check_len(static_cast<std::size_t>(v)));
