@@ -123,7 +123,19 @@ int main()
         auto scaled = pl.scaled(1);
         test::check(scaled.rank() == 2, "padic scaled");
         test::check(pl.p_adic_volume() > 0, "p-adic volume");
+        test::check(pl.p_adic_volume() == 1.0, "cubic volume is p^0 = 1");
         test::check(pl.p_adic_norm() > 0, "p-adic norm");
+        test::check(pl.p_adic_norm() == 1.0, "cubic norm is 1");
+        // Scaled cubic 5*I_2: det Gram = 625 = 5^4, so |.|_5 volume = 5^-4.
+        // (The old Euclidean-under-p-adic-name returned 25.0 here.)
+        {
+            auto lat5 = np::lattice::LatticeFactory::cubic<int64_t>(2);
+            for (int i = 0; i < 2; ++i)
+                lat5.basis(i, i) = 5;
+            PadicLattice<int64_t> pl5(lat5, 5, 10);
+            test::check(std::abs(pl5.p_adic_volume() - 1.0 / 625.0) < 1e-12, "p-adic volume 5^-4");
+            test::check(pl5.euclidean_volume() == 25.0, "euclidean volume kept");
+        }
         // meet/join
         auto pl2 = PadicFactory::cubic_padic<int64_t>(2, 5, 10);
         auto j = pl.join(pl2);
@@ -158,6 +170,51 @@ int main()
         test::check(std::holds_alternative<Padic<int64_t>>(var), "padic variant");
         std::optional<Padic<int64_t>> opt = a;
         test::check(opt.has_value(), "padic optional");
+    }
+
+    // ── Exactness above int64 + loud failures (honesty audit) ───────────────
+    {
+        // 7^2 * 2^70 overflows int64: the old static_cast<long long> paths
+        // truncated this to garbage; valuation must be exactly 2.
+        np::bigint huge = np::bigint(1);
+        huge <<= 70;
+        huge *= 49;
+        Padic<np::bigint> big(7, huge, 10);
+        test::check(big.valuation() == 2, "bigint valuation exact past int64");
+        // Negative big values keep their sign through valuation/expansion.
+        np::bigint neg = np::bigint(1);
+        neg <<= 65;
+        neg *= -343; // -(7^3 * 5)
+        Padic<np::bigint> negp(7, neg, 10);
+        test::check(negp.valuation() == 3, "bigint negative valuation");
+        // bigint agrees with int64 on small values (expansion + inverse).
+        Padic<np::bigint> bsmall(5, np::bigint(1234), 6);
+        Padic<int64_t> ismall(5, 1234, 6);
+        test::check(bsmall.expansion() == ismall.expansion(), "bigint/int expansion agree");
+        auto binv = Padic<np::bigint>(5, np::bigint(3), 5).inverse();
+        test::check((binv.value * 3) % np::bigint(3125) == np::bigint(1), "bigint inverse exact");
+        // Non-unit denominators are unrepresentable: loud throw, not silent 0.
+        bool threw = false;
+        try
+        {
+            (void)PadicFactory::from_rational(5, 1, 5);
+        }
+        catch (const std::runtime_error &)
+        {
+            threw = true;
+        }
+        test::check(threw, "from_rational non-unit throws");
+        // p^prec overflowing int64 is rejected up front (was silent garbage).
+        threw = false;
+        try
+        {
+            (void)Padic<int64_t>(7, 1, 30).inverse();
+        }
+        catch (const std::invalid_argument &)
+        {
+            threw = true;
+        }
+        test::check(threw, "prec overflow guard throws");
     }
 
     return test::failures() ? 1 : 0;
