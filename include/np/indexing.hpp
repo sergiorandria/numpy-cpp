@@ -24,6 +24,7 @@
 
 #include <algorithm>
 #include <optional>
+#include <type_traits>
 #include <variant>
 #include <vector>
 
@@ -550,18 +551,30 @@ NP_API template <typename T> inline void putmask(ndarray<T> &a, const ndarray<bo
 {
     if (a.shape != mask.shape)
         throw std::invalid_argument("putmask: shape mismatch");
-    if (a.is_contiguous() && values.is_contiguous())
+    // NOTE (honesty audit): an earlier revision indexed vp[i] with no size
+    // check (heap OOB on short values) and wrote from the buffer start,
+    // ignoring nonzero offsets. NumPy broadcasts scalar values; anything
+    // else must match element count — anything in between throws loudly.
+    if (values.size() != 1 && values.size() != a.size())
     {
-        T *__restrict ap = a.data().data();
-        const T *__restrict vp = values.data().data();
-        std::size_t n = a.size();
-        for (std::size_t i = 0; i < n; ++i)
+        throw std::invalid_argument("putmask: values must be scalar or match array size");
+    }
+    if constexpr (!std::is_same_v<T, bool>)
+    {
+        if (a.is_contiguous() && values.is_contiguous())
         {
-            bool m = mask.data()[mask._flat_logical(i)];
-            if (m)
-                ap[i] = vp[i];
+            T *__restrict ap = a.data().data() + a.offset;
+            const T *__restrict vp = values.data().data() + values.offset;
+            const std::size_t n = a.size();
+            const std::size_t vn = values.size();
+            for (std::size_t i = 0; i < n; ++i)
+            {
+                bool m = mask.data()[mask._flat_logical(i)];
+                if (m)
+                    ap[i] = vp[vn == 1 ? 0 : i];
+            }
+            return;
         }
-        return;
     }
     detail::Odometer od(a.shape);
     while (!od.done())
