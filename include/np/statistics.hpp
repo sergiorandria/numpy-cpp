@@ -762,9 +762,12 @@ NP_NODISCARD auto nanmean(const ndarray<T> &arr, int axis) -> ndarray<typename n
  *
  * All-NaN input yields NaN.
  */
-NP_API template <typename T> NP_NODISCARD auto nanvar(const ndarray<T> &arr) -> typename np::_mean_type<T>::type
+NP_API template <typename T>
+NP_NODISCARD auto nanvar(const ndarray<T> &arr, int ddof = 0) -> typename np::_mean_type<T>::type
 {
     using R = typename np::_mean_type<T>::type;
+    if (ddof < 0)
+        throw std::invalid_argument("nanvar: ddof must be >= 0");
     const auto m = nanmean(arr);
     if (detail::is_nan_elem(m))
     {
@@ -780,24 +783,29 @@ NP_API template <typename T> NP_NODISCARD auto nanvar(const ndarray<T> &arr) -> 
         acc += d * d;
         ++n;
     }
-    if (n == 0)
+    // NOTE (honesty audit): count-vs-ddof was previously ignored (always /n).
+    // NumPy yields NaN when ddof swallows the sample count.
+    if (n == 0 || n <= static_cast<std::size_t>(ddof))
         return static_cast<R>(std::numeric_limits<double>::quiet_NaN());
-    return static_cast<R>(acc / static_cast<long double>(n));
+    return static_cast<R>(acc / static_cast<long double>(n - static_cast<std::size_t>(ddof)));
 }
 
 /** @brief Standard deviation of all elements, ignoring NaN. */
-NP_API template <typename T> NP_NODISCARD auto nanstd(const ndarray<T> &arr) -> typename np::_mean_type<T>::type
+NP_API template <typename T>
+NP_NODISCARD auto nanstd(const ndarray<T> &arr, int ddof = 0) -> typename np::_mean_type<T>::type
 {
     using R = typename np::_mean_type<T>::type;
-    return static_cast<R>(std::sqrt(static_cast<long double>(nanvar(arr))));
+    return static_cast<R>(std::sqrt(static_cast<long double>(nanvar(arr, ddof))));
 }
 
-/** @brief Variance along an axis, ignoring NaN (population). */
+/** @brief Variance along an axis, ignoring NaN (NumPy default ddof=0). */
 NP_API template <typename T>
-NP_NODISCARD auto nanvar(const ndarray<T> &arr, int axis) -> ndarray<typename np::_mean_type<T>::type>
+NP_NODISCARD auto nanvar(const ndarray<T> &arr, int axis, int ddof) -> ndarray<typename np::_mean_type<T>::type>
 {
     using R = typename np::_mean_type<T>::type;
-    return detail::stat_axis_map<R>(arr, axis, [](const std::vector<T> &slice) -> R {
+    if (ddof < 0)
+        throw std::invalid_argument("nanvar: ddof must be >= 0");
+    return detail::stat_axis_map<R>(arr, axis, [ddof](const std::vector<T> &slice) -> R {
         long double sum = 0;
         std::size_t n = 0;
         for (auto &v : slice)
@@ -806,7 +814,7 @@ NP_NODISCARD auto nanvar(const ndarray<T> &arr, int axis) -> ndarray<typename np
                 sum += static_cast<long double>(v);
                 ++n;
             }
-        if (n == 0)
+        if (n == 0 || n <= static_cast<std::size_t>(ddof))
             return static_cast<R>(std::numeric_limits<double>::quiet_NaN());
         long double mean = sum / static_cast<long double>(n);
         long double acc = 0;
@@ -816,16 +824,16 @@ NP_NODISCARD auto nanvar(const ndarray<T> &arr, int axis) -> ndarray<typename np
                 long double d = static_cast<long double>(v) - mean;
                 acc += d * d;
             }
-        return static_cast<R>(acc / static_cast<long double>(n));
+        return static_cast<R>(acc / static_cast<long double>(n - static_cast<std::size_t>(ddof)));
     });
 }
 
 /** @brief Standard deviation along an axis, ignoring NaN. */
 NP_API template <typename T>
-NP_NODISCARD auto nanstd(const ndarray<T> &arr, int axis) -> ndarray<typename np::_mean_type<T>::type>
+NP_NODISCARD auto nanstd(const ndarray<T> &arr, int axis, int ddof) -> ndarray<typename np::_mean_type<T>::type>
 {
     using R = typename np::_mean_type<T>::type;
-    auto v = nanvar(arr, axis);
+    auto v = nanvar(arr, axis, ddof);
     ndarray<R> out(v.shape);
     for (std::size_t i = 0; i < v.size(); ++i)
         out.data()[i] = static_cast<R>(std::sqrt(static_cast<long double>(v.data()[i])));
@@ -1387,6 +1395,16 @@ NP_NODISCARD inline std::vector<std::vector<double>> cov_from_rows(const std::ve
     {
         return cov;
     }
+    // NOTE (honesty audit): an earlier revision divided by (k - ddof)
+    // unchecked, so k <= ddof produced 0/0 = NaN-by-accident at best and
+    // negative scaling at worst. NumPy yields NaN here (with a warning);
+    // the NaN values below match, minus the warning.
+    if (static_cast<long long>(k) <= static_cast<long long>(ddof))
+    {
+        std::vector<std::vector<double>> nan(n, std::vector<double>(
+                                                     n, std::numeric_limits<double>::quiet_NaN()));
+        return nan;
+    }
     const double normalizer = static_cast<double>(k - ddof);
     std::vector<double> mean(n, 0.0);
     for (std::size_t r = 0; r < n; ++r)
@@ -1459,7 +1477,12 @@ NP_NODISCARD inline std::vector<std::vector<double>> corr_from_rows(const std::v
             }
             else
             {
-                corr[r][c] = rows[r][c] == rows[c][r] ? 1.0 : 0.0;
+                // NOTE (honesty audit): an earlier revision compared raw
+                // observation VALUES here (rows[r][c] == rows[c][r]),
+                // reporting 1.0 for coincidentally equal values. A zero
+                // denominator means zero variance: the correlation is
+                // undefined, i.e. NaN like NumPy (which also warns).
+                corr[r][c] = std::numeric_limits<double>::quiet_NaN();
             }
         }
     }
@@ -1832,30 +1855,40 @@ NP_NODISCARD auto mean(const ndarray<T> &a, int axis, bool keepdims = false) -> 
     return a.mean(axis, keepdims);
 }
 
-/** @brief Variance of all elements (population, ddof=0). */
-NP_API template <typename T> NP_NODISCARD auto var(const ndarray<T> &a) -> typename _mean_type<T>::type
-{
-    return a.var();
-}
-
-/** @brief Variance along axis. */
+/** @brief Variance of all elements (NumPy default ddof=0). */
+NP_API template <typename T> NP_NODISCARD auto var_ddof(const ndarray<T> &a, int ddof) -> typename _mean_type<T>::type;
 NP_API template <typename T>
-NP_NODISCARD auto var(const ndarray<T> &a, int axis, bool keepdims = false) -> ndarray<typename _mean_type<T>::type>
+NP_NODISCARD auto var(const ndarray<T> &a, int ddof = 0) -> typename _mean_type<T>::type
 {
-    return a.var(axis, keepdims);
+    return var_ddof(a, ddof);
 }
 
-/** @brief Std dev of all elements. */
-NP_API template <typename T> NP_NODISCARD auto std(const ndarray<T> &a) -> typename _mean_type<T>::type
-{
-    return a.std();
-}
-
-/** @brief Std dev along axis. */
+/** @brief Variance along axis (NumPy default ddof=0). */
 NP_API template <typename T>
-NP_NODISCARD auto std(const ndarray<T> &a, int axis, bool keepdims = false) -> ndarray<typename _mean_type<T>::type>
+NP_NODISCARD auto var(const ndarray<T> &a, int axis, int ddof, bool keepdims = false)
+    -> ndarray<typename _mean_type<T>::type>;
+NP_API template <typename T>
+NP_NODISCARD auto var(const ndarray<T> &a, int axis, bool keepdims, int ddof) -> ndarray<typename _mean_type<T>::type>
 {
-    return a.std(axis, keepdims);
+    return var(a, axis, ddof, keepdims);
+}
+
+/** @brief Std dev of all elements (NumPy default ddof=0). */
+NP_API template <typename T>
+NP_NODISCARD auto std(const ndarray<T> &a, int ddof = 0) -> typename _mean_type<T>::type
+{
+    return static_cast<typename _mean_type<T>::type>(std::sqrt(static_cast<long double>(var(a, ddof))));
+}
+
+/** @brief Std dev along axis (NumPy default ddof=0). */
+NP_API template <typename T>
+NP_NODISCARD auto std(const ndarray<T> &a, int axis, bool keepdims, int ddof) -> ndarray<typename _mean_type<T>::type>
+{
+    auto v = var(a, axis, keepdims, ddof);
+    ndarray<typename _mean_type<T>::type> out(v.shape);
+    for (std::size_t i = 0; i < v.size(); ++i)
+        out.data()[i] = static_cast<typename _mean_type<T>::type>(std::sqrt(static_cast<long double>(v.data()[i])));
+    return out;
 }
 
 /** @brief Average with returned flag (numpy: average(..., returned=True)).
@@ -2066,10 +2099,15 @@ NP_NODISCARD auto histogramdd(const std::vector<ndarray<T>> &samples, int bins =
 // Var / Std with ddof (numpy keeps population default ddof=0)
 NP_API template <typename T> NP_NODISCARD auto var_ddof(const ndarray<T> &a, int ddof) -> typename _mean_type<T>::type
 {
+    using R = typename _mean_type<T>::type;
     if (a.size() == 0)
         throw std::invalid_argument("var: empty array");
-    if (ddof < 0)
-        throw std::invalid_argument("var: ddof must be >=0");
+    // NOTE (honesty audit): NumPy never throws for ddof (negative ddof just
+    // enlarges the denominator; ddof >= n yields NaN with a warning). The
+    // earlier revision threw invalid_argument here; return NaN instead, the
+    // same rule as nanvar/nanstd below.
+    if (ddof >= static_cast<int>(a.size()))
+        return static_cast<R>(std::numeric_limits<double>::quiet_NaN());
     auto m = mean(a);
     long double acc = 0;
     for (auto it = a.begin(); it != a.end(); ++it)
@@ -2077,15 +2115,12 @@ NP_API template <typename T> NP_NODISCARD auto var_ddof(const ndarray<T> &a, int
         long double d = static_cast<long double>(*it) - static_cast<long double>(m);
         acc += d * d;
     }
-    long double denom = static_cast<long double>(a.size() - ddof);
-    if (denom <= 0)
-        throw std::invalid_argument("var: ddof too large");
+    const long double denom = static_cast<long double>(static_cast<long long>(a.size()) - static_cast<long long>(ddof));
     return static_cast<typename _mean_type<T>::type>(acc / denom);
 }
 
 NP_API template <typename T>
-NP_NODISCARD auto var(const ndarray<T> &a, int axis, int ddof, bool keepdims = false)
-    -> ndarray<typename _mean_type<T>::type>
+NP_NODISCARD auto var(const ndarray<T> &a, int axis, int ddof, bool keepdims) -> ndarray<typename _mean_type<T>::type>
 {
     using R = typename _mean_type<T>::type;
     auto m = mean(a, axis, keepdims);
@@ -2100,10 +2135,9 @@ NP_NODISCARD auto var(const ndarray<T> &a, int axis, int ddof, bool keepdims = f
     // Need to iterate slices
     // Reuse gather logic via stat_axis_map with custom ddof scaling
     auto base = detail::stat_axis_map<R>(a, axis, [&](const std::vector<T> &slice) -> R {
-        if (slice.empty())
-            throw std::invalid_argument("var: empty slice");
-        if (static_cast<int>(slice.size()) <= ddof)
-            throw std::invalid_argument("var: ddof too large");
+        // Same NaN rule as var_ddof/nanvar (NumPy warns and yields NaN).
+        if (slice.empty() || static_cast<long long>(slice.size()) <= static_cast<long long>(ddof))
+            return static_cast<R>(std::numeric_limits<double>::quiet_NaN());
         long double sum = 0;
         for (auto &v : slice)
             sum += static_cast<long double>(v);
@@ -2114,14 +2148,14 @@ NP_NODISCARD auto var(const ndarray<T> &a, int axis, int ddof, bool keepdims = f
             long double d = static_cast<long double>(v) - mean;
             acc += d * d;
         }
-        return static_cast<R>(acc / static_cast<long double>(slice.size() - ddof));
+        return static_cast<R>(
+            acc / static_cast<long double>(static_cast<long long>(slice.size()) - static_cast<long long>(ddof)));
     });
     return base;
 }
 
 NP_API template <typename T>
-NP_NODISCARD auto std(const ndarray<T> &a, int axis, int ddof, bool keepdims = false)
-    -> ndarray<typename _mean_type<T>::type>
+NP_NODISCARD auto std(const ndarray<T> &a, int axis, int ddof, bool keepdims) -> ndarray<typename _mean_type<T>::type>
 {
     auto v = var(a, axis, ddof, keepdims);
     for (auto &x : v.data())
