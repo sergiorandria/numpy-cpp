@@ -1,8 +1,13 @@
 /**
  * @file random.hpp
- * @brief Random number generation (NumPy random.Generator API).
+ * @brief Random number generation (NumPy random.Generator API shape).
  *
- * Provides NumPy-compatible random number generation using C++11 <random>.
+ * Provides API-compatible random number generation using C++11 <random>:
+ * method names and signatures mirror np.random.Generator, but the
+ * underlying engine is std::mt19937_64, NOT NumPy's default PCG64 — the
+ * same seed produces different streams than NumPy (an earlier revision
+ * claimed bit-compatibility). Do not cross-validate raw streams against
+ * NumPy; validate distributions statistically instead.
  * Implements the Generator class with all standard distributions.
  *
  * Reference: numpy-reference/reference/random/generator.html
@@ -32,11 +37,43 @@
 namespace np::random
 {
 
+namespace detail
+{
+// Loud domain validation for distribution parameters. std:: distributions
+// have narrow preconditions (violating them is UB, not an error); NaN fails
+// every check via !(x relop y). Verified edge-by-edge against NumPy, whose
+// conventions are followed (e.g. exponential(0) and geometric(1) are valid
+// and degenerate; poisson(0) is valid).
+template <typename T> inline void require_positive(T v, const char *what)
+{
+    if (!(v > T{0}))
+    {
+        throw std::invalid_argument(what);
+    }
+}
+template <typename T> inline void require_nonnegative(T v, const char *what)
+{
+    if (!(v >= T{0}))
+    {
+        throw std::invalid_argument(what);
+    }
+}
+template <typename T> inline void require_unit_interval(T p, const char *what)
+{
+    if (!(p >= T{0}) || !(p <= T{1}))
+    {
+        throw std::invalid_argument(what);
+    }
+}
+} // namespace detail
+
+
 /**
- * @brief Random number generator (NumPy Generator equivalent).
+ * @brief Random number generator (NumPy Generator API equivalent).
  *
- * Wraps C++ std::mt19937_64 (Mersenne Twister) for NumPy-compatible
- * random number generation.
+ * Wraps C++ std::mt19937_64 (Mersenne Twister). API-compatible with
+ * np.random.Generator (same method names/shapes); streams are NOT
+ * bit-compatible with NumPy, whose default engine is PCG64.
  *
  * Reference: numpy-reference/reference/random/generator.html
  */
@@ -254,6 +291,16 @@ class Generator
      */
     template <typename T> auto choice(const ndarray<T> &a, std::size_t size = 1, bool replace = true) -> ndarray<T>
     {
+        // NOTE (honesty audit): uniform_int_distribution(0, n-1) with n == 0
+        // wraps to SIZE_MAX (then OOB) — guard explicitly.
+        if (a.size() == 0)
+        {
+            if (size == 0)
+            {
+                return ndarray<T>(std::vector<int>{0});
+            }
+            throw std::invalid_argument("choice: cannot sample from empty array");
+        }
         if (a.ndim() != 1)
         {
             throw std::invalid_argument("choice: array must be 1-D");
@@ -336,6 +383,9 @@ class Generator
      */
     template <typename T = double> auto exponential(T scale = T{1}, const std::vector<int> &size = {}) -> ndarray<T>
     {
+        detail::require_nonnegative(scale, "exponential: scale must be >= 0");
+        if (scale == T{0})
+            return ndarray<T>(size, dtype_of<T>); // degenerate: all zeros, like NumPy
         std::exponential_distribution<T> dist(T{1} / scale);
         return _fill_distribution<T>(engine_, dist, size);
     }
@@ -357,6 +407,8 @@ class Generator
      */
     template <typename T = double> auto gamma(T shape, T scale = T{1}, const std::vector<int> &size = {}) -> ndarray<T>
     {
+        detail::require_positive(shape, "gamma: shape must be > 0");
+        detail::require_positive(scale, "gamma: scale must be > 0");
         std::gamma_distribution<T> dist(shape, scale);
         return _fill_distribution<T>(engine_, dist, size);
     }
@@ -378,6 +430,8 @@ class Generator
      */
     template <typename T = double> auto beta(T a, T b, const std::vector<int> &size = {}) -> ndarray<T>
     {
+        detail::require_positive(a, "beta: a must be > 0");
+        detail::require_positive(b, "beta: b must be > 0");
         // Beta distribution: X ~ Gamma(a,1) / (Gamma(a,1) + Gamma(b,1))
         std::gamma_distribution<T> dist_a(a, T{1});
         std::gamma_distribution<T> dist_b(b, T{1});
@@ -406,6 +460,7 @@ class Generator
      */
     template <typename T = double> auto chisquare(T df, const std::vector<int> &size = {}) -> ndarray<T>
     {
+        detail::require_positive(df, "chisquare: df must be > 0");
         std::chi_squared_distribution<T> dist(df);
         return _fill_distribution<T>(engine_, dist, size);
     }
@@ -417,6 +472,8 @@ class Generator
      */
     template <typename T = double> auto f(T dfnum, T dfden, const std::vector<int> &size = {}) -> ndarray<T>
     {
+        detail::require_positive(dfnum, "f: dfnum must be > 0");
+        detail::require_positive(dfden, "f: dfden must be > 0");
         std::fisher_f_distribution<T> dist(dfnum, dfden);
         return _fill_distribution<T>(engine_, dist, size);
     }
@@ -428,6 +485,7 @@ class Generator
      */
     template <typename T = double> auto standard_t(T df, const std::vector<int> &size = {}) -> ndarray<T>
     {
+        detail::require_positive(df, "standard_t: df must be > 0");
         std::student_t_distribution<T> dist(df);
         return _fill_distribution<T>(engine_, dist, size);
     }
@@ -462,6 +520,7 @@ class Generator
      */
     template <typename T = double> auto weibull(T a, const std::vector<int> &size = {}) -> ndarray<T>
     {
+        detail::require_positive(a, "weibull: a must be > 0");
         std::weibull_distribution<T> dist(a, T{1});
         return _fill_distribution<T>(engine_, dist, size);
     }
@@ -474,6 +533,9 @@ class Generator
     template <typename T = double>
     auto poisson(T lam = T{1}, const std::vector<int> &size = {}) -> ndarray<std::int64_t>
     {
+        detail::require_nonnegative(lam, "poisson: lam must be >= 0");
+        if (lam == T{0})
+            return ndarray<std::int64_t>(size, dtype_of<std::int64_t>);
         std::poisson_distribution<std::int64_t> dist(lam);
         return _fill_distribution<std::int64_t>(engine_, dist, size);
     }
@@ -485,6 +547,9 @@ class Generator
      */
     auto binomial(std::int64_t n, double p, const std::vector<int> &size = {}) -> ndarray<std::int64_t>
     {
+        if (n < 0)
+            throw std::invalid_argument("binomial: n must be >= 0");
+        detail::require_unit_interval(p, "binomial: p must be in [0, 1]");
         std::binomial_distribution<std::int64_t> dist(n, p);
         return _fill_distribution<std::int64_t>(engine_, dist, size);
     }
@@ -496,6 +561,12 @@ class Generator
      */
     auto negative_binomial(std::int64_t n, double p, const std::vector<int> &size = {}) -> ndarray<std::int64_t>
     {
+        if (n <= 0)
+            throw std::invalid_argument("negative_binomial: n must be > 0");
+        if (!(p > 0.0) || !(p <= 1.0))
+            throw std::invalid_argument("negative_binomial: p must be in (0, 1]");
+        if (p == 1.0)
+            return ndarray<std::int64_t>(size, dtype_of<std::int64_t>);
         std::negative_binomial_distribution<std::int64_t> dist(n, p);
         return _fill_distribution<std::int64_t>(engine_, dist, size);
     }
@@ -507,6 +578,10 @@ class Generator
      */
     auto geometric(double p, const std::vector<int> &size = {}) -> ndarray<std::int64_t>
     {
+        if (!(p > 0.0) || !(p <= 1.0))
+            throw std::invalid_argument("geometric: p must be in (0, 1]");
+        if (p == 1.0)
+            return ndarray<std::int64_t>(size, dtype_of<std::int64_t>, std::int64_t{1});
         std::geometric_distribution<std::int64_t> dist(p);
         return _fill_distribution<std::int64_t>(engine_, dist, size);
     }
@@ -518,6 +593,7 @@ class Generator
      */
     template <typename T = double> auto pareto(T a, const std::vector<int> &size = {}) -> ndarray<T>
     {
+        detail::require_positive(a, "pareto: a must be > 0");
         // Pareto: X = (1/U)^(1/a) - 1, where U ~ Uniform(0,1)
         std::uniform_real_distribution<T> dist(T{0}, T{1});
 
@@ -543,6 +619,7 @@ class Generator
      */
     template <typename T = double> auto power(T a, const std::vector<int> &size = {}) -> ndarray<T>
     {
+        detail::require_positive(a, "power: a must be > 0");
         // Power: X = U^(1/a), where U ~ Uniform(0,1)
         std::uniform_real_distribution<T> dist(T{0}, T{1});
 
@@ -633,6 +710,7 @@ class Generator
      */
     template <typename T = double> auto rayleigh(T scale = T{1}, const std::vector<int> &size = {}) -> ndarray<T>
     {
+        detail::require_nonnegative(scale, "rayleigh: scale must be >= 0");
         // Rayleigh: X = scale * sqrt(-2*log(U))
         std::uniform_real_distribution<T> dist(T{0}, T{1});
 
@@ -659,6 +737,8 @@ class Generator
     template <typename T = double>
     auto triangular(T left, T mode, T right, const std::vector<int> &size = {}) -> ndarray<T>
     {
+        if (!(left <= mode) || !(mode <= right) || !(left < right))
+            throw std::invalid_argument("triangular: need left <= mode <= right with left < right");
         // Use inverse CDF method for triangular distribution
         std::uniform_real_distribution<T> dist(T{0}, T{1});
         const T fc = (mode - left) / (right - left);
@@ -738,6 +818,8 @@ class Generator
      */
     template <typename T = double> auto logseries(T p, const std::vector<int> &size = {}) -> ndarray<std::int64_t>
     {
+        if (!(p > T{0}) || !(p < T{1}))
+            throw std::invalid_argument("logseries: p must be in (0, 1)");
         // Log-series: P(X=k) = -p^k / (k * log(1-p))
         std::uniform_real_distribution<T> dist(T{0}, T{1});
         const T log_q = std::log(T{1} - p);
@@ -776,6 +858,8 @@ class Generator
      */
     template <typename T = double> auto wald(T mean, T scale, const std::vector<int> &size = {}) -> ndarray<T>
     {
+        detail::require_positive(mean, "wald: mean must be > 0");
+        detail::require_positive(scale, "wald: scale must be > 0");
         // Wald/Inverse Gaussian: use transformation method
         std::normal_distribution<T> normal(T{0}, T{1});
         std::uniform_real_distribution<T> uniform(T{0}, T{1});
@@ -817,6 +901,18 @@ class Generator
      */
     template <typename T = double> auto vonmises(T mu, T kappa, const std::vector<int> &size = {}) -> ndarray<T>
     {
+        detail::require_nonnegative(kappa, "vonmises: kappa must be >= 0");
+        if (kappa == T{0})
+        {
+            // Uniform on the circle (Best-Fisher divides by kappa below).
+            std::uniform_real_distribution<T> uni(-std::numbers::pi_v<T>, std::numbers::pi_v<T>);
+            if (size.empty())
+                return ndarray<T>::from_data({1}, {mu + uni(engine_)});
+            ndarray<T> out(size, dtype_of<T>);
+            for (auto &v : out.data())
+                v = mu + uni(engine_);
+            return out;
+        }
         // Von Mises: circular normal distribution
         // Use Best-Fisher algorithm
         std::uniform_real_distribution<T> uniform(T{0}, T{1});
@@ -863,6 +959,8 @@ class Generator
      */
     template <typename T = double> auto zipf(T a, const std::vector<int> &size = {}) -> ndarray<std::int64_t>
     {
+        if (!(a > T{1}))
+            throw std::invalid_argument("zipf: a must be > 1");
         // Zipf: P(k) ~ 1/k^a
         // Use rejection sampling
         std::uniform_real_distribution<T> uniform(T{0}, T{1});
@@ -1052,7 +1150,7 @@ class Generator
         // permute slices along axis independently
         std::vector<int> out_shape = x.shape;
         out_shape.erase(out_shape.begin() + ax);
-        detail::Odometer od(out_shape.empty() ? std::vector<int>{1} : out_shape);
+        np::detail::Odometer od(out_shape.empty() ? std::vector<int>{1} : out_shape);
         int n = x.shape[ax];
         std::vector<int> perm(n);
         std::iota(perm.begin(), perm.end(), 0);
@@ -1127,6 +1225,8 @@ class Generator
     template <typename T = double>
     auto noncentral_chisquare(T df, T nonc, const std::vector<int> &size = {}) -> ndarray<T>
     {
+        detail::require_positive(df, "noncentral_chisquare: df must be > 0");
+        detail::require_nonnegative(nonc, "noncentral_chisquare: nonc must be >= 0");
         std::chi_squared_distribution<T> cs(df);
         std::normal_distribution<T> nd(std::sqrt(nonc), T{1});
         if (size.empty())
@@ -1309,17 +1409,27 @@ thread_local Generator default_generator_;
 } // namespace
 
 /**
- * @brief Get or create the default random generator.
+ * @brief Get the default random generator.
  * Reference:
  * numpy-reference/reference/random/generated/numpy.random.default_rng.html
+ *
+ * NOTE (honesty audit): an earlier revision took an optional seed and
+ * reseeded this shared global in place, unlike NumPy, where default_rng(seed)
+ * returns a NEW independent Generator. Seeding the shared global moved to
+ * seed_default_rng() below; this accessor never mutates.
  */
-inline Generator &default_rng(std::optional<std::uint64_t> seed = std::nullopt)
+inline Generator &default_rng()
 {
-    if (seed.has_value())
-    {
-        default_generator_ = Generator(*seed);
-    }
     return default_generator_;
+}
+
+/**
+ * @brief Reseed the shared default generator (explicit, unlike NumPy).
+ * @param seed New seed for the process-wide default generator.
+ */
+inline void seed_default_rng(std::uint64_t seed)
+{
+    default_generator_ = Generator(seed);
 }
 
 // Convenience wrappers using default generator
@@ -1403,7 +1513,9 @@ NP_API template <typename T> NP_NODISCARD inline auto permuted(const ndarray<T> 
     return default_rng().permuted(x, axis);
 }
 
-/** @brief Seed sequence wrapper (np.random.SeedSequence). */
+/** @brief Seed sequence holder (NOT np.random.SeedSequence's mixing algorithm:
+ * this is a 2xuint32 std::seed_seq split, sufficient for seeding mt19937_64
+ * but not bit-compatible with NumPy's SeedSequence spawn/advance semantics). */
 NP_API struct SeedSequence
 {
     std::uint64_t seed = 0;
@@ -1475,44 +1587,21 @@ NP_API struct BitGenerator
     }
 };
 
-/** @brief PCG64 BitGenerator (np.random.PCG64). */
-NP_API struct PCG64
-{
-    std::uint64_t state = 0;
-    std::mt19937_64 engine;
-    explicit PCG64(std::uint64_t s = 0) : state(s), engine(s)
-    {
-    }
-    ~PCG64()
-    {
-        pqc::secure_zero(&state, sizeof(state));
-        pqc::secure_zero(&engine, sizeof(engine));
-        pqc::ct_barrier();
-    }
-    std::uint64_t random_raw()
-    {
-        return engine();
-    }
-    void advance(std::uint64_t delta)
-    {
-        for (std::uint64_t i = 0; i < delta; ++i)
-            (void)engine();
-    }
-    void secure_clear() noexcept
-    {
-        pqc::secure_zero(&state, sizeof(state));
-        pqc::secure_zero(&engine, sizeof(engine));
-        pqc::ct_barrier();
-    }
-};
-
-/** @brief MT19937 BitGenerator (np.random.MT19937) – Mersenne Twister. */
+/** @brief MT19937 BitGenerator (np.random.MT19937) – genuine Mersenne Twister.
+ * NOTE (honesty audit): sibling structs formerly named PCG64/Philox/SFC64
+ * were mt19937_64 with different seed XORs and are deleted; this one really
+ * is MT19937. The full 64-bit seed is spread via seed_seq (an earlier
+ * revision truncated to 32 bits, silently colliding seeds that differed
+ * only in high bits). Streams are NOT NumPy-bit-compatible (NumPy uses
+ * its own seeding/stream advancement). */
 NP_API struct MT19937
 {
     std::uint64_t state = 0;
     std::mt19937 engine32;
-    explicit MT19937(std::uint64_t s = 0) : state(s), engine32(static_cast<std::uint32_t>(s))
+    explicit MT19937(std::uint64_t s = 0) : state(s)
     {
+        std::seed_seq seq{static_cast<std::uint32_t>(s), static_cast<std::uint32_t>(s >> 32)};
+        engine32.seed(seq);
     }
     ~MT19937()
     {
@@ -1533,68 +1622,6 @@ NP_API struct MT19937
     {
         pqc::secure_zero(&state, sizeof(state));
         pqc::secure_zero(&engine32, sizeof(engine32));
-        pqc::ct_barrier();
-    }
-};
-
-/** @brief Philox BitGenerator (np.random.Philox). */
-NP_API struct Philox
-{
-    std::uint64_t state = 0;
-    std::mt19937_64 engine;
-    explicit Philox(std::uint64_t s = 0) : state(s), engine(s ^ 0x9e3779b97f4a7c15ULL)
-    {
-    }
-    ~Philox()
-    {
-        pqc::secure_zero(&state, sizeof(state));
-        pqc::secure_zero(&engine, sizeof(engine));
-        pqc::ct_barrier();
-    }
-    std::uint64_t random_raw()
-    {
-        return engine();
-    }
-    void advance(std::uint64_t delta)
-    {
-        for (std::uint64_t i = 0; i < delta; ++i)
-            (void)engine();
-    }
-    void secure_clear() noexcept
-    {
-        pqc::secure_zero(&state, sizeof(state));
-        pqc::secure_zero(&engine, sizeof(engine));
-        pqc::ct_barrier();
-    }
-};
-
-/** @brief SFC64 BitGenerator (np.random.SFC64). */
-NP_API struct SFC64
-{
-    std::uint64_t state = 0;
-    std::mt19937_64 engine;
-    explicit SFC64(std::uint64_t s = 0) : state(s), engine(s ^ 0xdeadbeefcafeULL)
-    {
-    }
-    ~SFC64()
-    {
-        pqc::secure_zero(&state, sizeof(state));
-        pqc::secure_zero(&engine, sizeof(engine));
-        pqc::ct_barrier();
-    }
-    std::uint64_t random_raw()
-    {
-        return engine();
-    }
-    void advance(std::uint64_t delta)
-    {
-        for (std::uint64_t i = 0; i < delta; ++i)
-            (void)engine();
-    }
-    void secure_clear() noexcept
-    {
-        pqc::secure_zero(&state, sizeof(state));
-        pqc::secure_zero(&engine, sizeof(engine));
         pqc::ct_barrier();
     }
 };

@@ -11,6 +11,7 @@
 #include <np/random.hpp>
 
 #include <cmath>
+#include <numbers>
 
 int main()
 {
@@ -247,10 +248,73 @@ int main()
         test::check(x.max() <= 1.0, "triangular: max <= right");
     }
 
+    // --- Distribution parameter guards (match NumPy domain rules) ---
+    {
+        Generator gen(999);
+        auto must_throw = [&](auto &&fn, const char *what) {
+            bool threw = false;
+            try
+            {
+                fn();
+            }
+            catch (const std::invalid_argument &)
+            {
+                threw = true;
+            }
+            test::check(threw, what);
+        };
+
+        must_throw([&] { gen.exponential(-1.0); }, "exponential: negative scale throws");
+        must_throw([&] { gen.gamma(0.0); }, "gamma: zero shape throws");
+        must_throw([&] { gen.gamma(1.0, 0.0); }, "gamma: zero scale throws");
+        must_throw([&] { gen.beta(0.0, 1.0); }, "beta: zero a throws");
+        must_throw([&] { gen.beta(1.0, -1.0); }, "beta: negative b throws");
+        must_throw([&] { gen.chisquare(0.0); }, "chisquare: zero df throws");
+        must_throw([&] { gen.f(0.0, 1.0); }, "f: zero dfnum throws");
+        must_throw([&] { gen.f(1.0, 0.0); }, "f: zero dfden throws");
+        must_throw([&] { gen.standard_t(0.0); }, "standard_t: zero df throws");
+        must_throw([&] { gen.weibull(0.0); }, "weibull: zero a throws");
+        must_throw([&] { gen.binomial(-1, 0.5); }, "binomial: negative n throws");
+        must_throw([&] { gen.binomial(5, -0.1); }, "binomial: p < 0 throws");
+        must_throw([&] { gen.binomial(5, 1.1); }, "binomial: p > 1 throws");
+        must_throw([&] { gen.negative_binomial(0, 0.5); }, "negative_binomial: zero n throws");
+        must_throw([&] { gen.negative_binomial(5, 0.0); }, "negative_binomial: p = 0 throws");
+        must_throw([&] { gen.negative_binomial(5, 1.5); }, "negative_binomial: p > 1 throws");
+        must_throw([&] { gen.geometric(0.0); }, "geometric: p = 0 throws");
+        must_throw([&] { gen.geometric(1.5); }, "geometric: p > 1 throws");
+        must_throw([&] { gen.poisson(-1.0); }, "poisson: negative lam throws");
+        must_throw([&] { gen.pareto(0.0); }, "pareto: zero a throws");
+        must_throw([&] { gen.power(-2.0); }, "power: negative a throws");
+        must_throw([&] { gen.rayleigh(-1.0); }, "rayleigh: negative scale throws");
+        must_throw([&] { gen.triangular(1.0, 0.0, 2.0); }, "triangular: mode < left throws");
+        must_throw([&] { gen.triangular(0.0, 0.0, 0.0); }, "triangular: degenerate throws");
+        must_throw([&] { gen.wald(0.0, 1.0); }, "wald: zero mean throws");
+        must_throw([&] { gen.wald(1.0, 0.0); }, "wald: zero scale throws");
+        must_throw([&] { gen.zipf(1.0); }, "zipf: a = 1 throws");
+        must_throw([&] { gen.logseries(0.0); }, "logseries: p = 0 throws");
+        must_throw([&] { gen.logseries(1.0); }, "logseries: p = 1 throws");
+        must_throw([&] { gen.vonmises(0.0, -1.0); }, "vonmises: negative kappa throws");
+        must_throw([&] { gen.noncentral_chisquare(0.0, 1.0); }, "noncentral_chisquare: zero df throws");
+        must_throw([&] { gen.noncentral_chisquare(2.0, -1.0); }, "noncentral_chisquare: negative nonc throws");
+
+        // Degenerate-but-valid distributions (verified against NumPy).
+        test::check(gen.exponential(0.0, {4}).sum() == 0.0, "exponential(0): all zeros");
+        test::check(gen.poisson(0.0, {4}).sum() == 0, "poisson(0): all zeros");
+        test::check(gen.rayleigh(0.0, {4}).sum() == 0.0, "rayleigh(0): all zeros");
+        test::check(gen.negative_binomial(5, 1.0, {4}).sum() == 0, "negative_binomial(p=1): all zeros");
+        test::check(gen.geometric(1.0, {4}).sum() == 4, "geometric(p=1): all ones");
+        auto vm = gen.vonmises(1.0, 0.0, {16});
+        bool vm_in_range = true;
+        for (std::size_t i = 0; i < vm.size(); ++i)
+            if (vm.at(i) < 1.0 - std::numbers::pi || vm.at(i) > 1.0 + std::numbers::pi)
+                vm_in_range = false;
+        test::check(vm_in_range, "vonmises(kappa=0): uniform on circle");
+    }
+
     // --- Module-level convenience functions ---
     {
         // Set seed for reproducibility
-        default_rng(42);
+        seed_default_rng(42);
 
         auto x1 = rand<double>({5});
         test::check(x1.shape[0] == 5, "rand: shape");
