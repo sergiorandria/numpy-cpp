@@ -20,6 +20,7 @@ set(NP_TESTS
     test_chararray
     test_unimplemented
     test_threadpool
+    test_gpu_backend
     test_bigint
     test_abstract
     test_variety
@@ -58,6 +59,14 @@ foreach(t ${NP_TESTS})
     endif()
     add_test(NAME ${t} COMMAND ${t})
 endforeach()
+
+# LeakSanitizer suppressions (root lsan.supp): the NVIDIA driver/runtime
+# libraries leak their own one-time init allocations (cuInit, ...), which
+# would otherwise fail every ASan+LSan ctest run on GPU machines at exit.
+# LSAN_OPTIONS is ignored when sanitizers are off, so this is a no-op there.
+if(NOT MSVC)
+    set_tests_properties(${NP_TESTS} PROPERTIES ENVIRONMENT "LSAN_OPTIONS=suppressions=${CMAKE_SOURCE_DIR}/lsan.supp")
+endif()
 
 # Standalone micro-benchmark for math.hpp ufunc paths. Not run by
 # ctest; invoke directly: ./build/tests/bench_math
