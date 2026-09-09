@@ -101,9 +101,9 @@ int main()
         LLLStrategy<double> s;
         auto Rs = L.reduce_with(s);
         test::check(Rs.rank() == 2, "strategy reduce");
-        BKZStrategy<double> bkz;
+        WindowedLLLStrategy<double> bkz;
         auto Rb = L.reduce_with(bkz);
-        test::check(Rb.rank() == 2, "bkz strategy");
+        test::check(Rb.rank() == 2, "windowedlll strategy");
         // Decorator
         np::ndarray<double> Tmat(std::vector<int>{2, 2});
         Tmat(0, 0) = 1;

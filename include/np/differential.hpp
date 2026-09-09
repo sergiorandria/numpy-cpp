@@ -382,12 +382,20 @@ template <Scalar T = f64_t> struct InterpreterStrategy : IEvaluator<T>
     }
 };
 
-// Decorator pattern: caching layer for any evaluator (memoization)
+// Decorator pattern: caching layer for any evaluator (memoization).
+//
+// NOTE (honesty audit): cache keys embed the Node's ADDRESS, so entries are
+// valid only while that Node object is alive (same rule as dereferencing
+// it). In-repo use always evaluates through a VM that owns both root and
+// evaluator, where this holds; evaluating destroyed nodes is UB by
+// construction, not a supported pattern. The cache is also now bounded
+// (was: unbounded growth).
 template <Scalar T = f64_t> struct CachedEvaluator : IEvaluator<T>
 {
     std::shared_ptr<IEvaluator<T>> inner;
     mutable std::unordered_map<std::string, T> cache_;
     mutable std::shared_mutex mtx_;
+    static constexpr std::size_t kMaxEntries = 4096;
     explicit CachedEvaluator(std::shared_ptr<IEvaluator<T>> in) : inner(std::move(in))
     {
     }
@@ -410,6 +418,10 @@ template <Scalar T = f64_t> struct CachedEvaluator : IEvaluator<T>
         T v = inner->eval(n, p);
         {
             std::unique_lock lock(mtx_);
+            if (cache_.size() >= kMaxEntries)
+            {
+                cache_.clear();
+            }
             cache_[k] = v;
         }
         return v;
@@ -1016,6 +1028,8 @@ NP_NODISCARD inline NodePtr simplify(const NodePtr &n)
     return n;
 }
 
+// NOTE: central differences (h=1e-7), so d²=0 and Leibniz hold only
+// approximately — de Rham identities on these forms carry FD tolerance.
 template <Scalar T> NP_NODISCARD inline OneFormT<T> exterior_scalar(const ScalarFieldT<T> &f)
 {
     OneFormT<T> out;
@@ -1272,6 +1286,31 @@ class VM
         return d;
     }
 
+    // Symbolic Laplacian built at the Node-tree level (no string
+    // round-trip: to_string() of a differentiated VM is not re-parseable).
+    NP_NODISCARD VM laplacian() const
+    {
+        const int n = dim();
+        if (n == 0)
+            throw std::invalid_argument("laplacian: dim 0");
+        NodePtr sum = make_const(0.0);
+        for (int i = 0; i < n; ++i)
+        {
+            VM d2 = derivative_vm(i).derivative_vm(i);
+            auto add = std::make_shared<Node>();
+            add->type = Node::Type::Add;
+            add->left = sum;
+            add->right = d2.root;
+            sum = std::move(add);
+        }
+        VM out;
+        out.vars = vars;
+        out.var_index = var_index;
+        out.root = std::move(sum);
+        out.expr = "laplacian(" + expr + ")";
+        out.evaluator = evaluator;
+        return out;
+    }
     VM derivative_vm(int var) const
     {
         VM out;
@@ -1580,15 +1619,11 @@ inline ScalarField laplacian_field(const VM &f)
 }
 inline VM laplacian(const VM &f)
 {
-    int n = f.dim();
-    if (n == 0)
-        throw std::invalid_argument("laplacian: dim 0");
-    std::string expr = "(" + f.derivative_vm(0).derivative_vm(0).to_string() + ")";
-    for (int i = 1; i < n; ++i)
-    {
-        expr += "+(" + f.derivative_vm(i).derivative_vm(i).to_string() + ")";
-    }
-    return VM(expr, f.variables());
+    // NOTE (honesty audit): an earlier revision rebuilt this from
+    // to_string() fragments, but derivative_vm() tags expr as e.g.
+    // "x^2'_d0'_d0", which parse_primary rejects — so laplacian() ALWAYS
+    // threw. The tree-level member above replaces string surgery.
+    return f.laplacian();
 }
 inline f64_t laplacian_eval(const VM &f, const Point &p)
 {
@@ -1907,7 +1942,11 @@ NP_NODISCARD inline OneFormT<T> pullback(const OneFormT<T> &omega,
                                          const std::function<PointT<T>(const PointT<T> &)> &phi,
                                          const std::function<std::vector<std::vector<T>>(const PointT<T> &)> &dphi)
 {
-    // (phi^* omega)_p (v) = omega_{phi(p)} (d phi_p (v))
+    // (phi^* omega)_p (v) = omega_{phi(p)} (d phi_p (v)).
+    // Jacobian convention (was an open question in code): dphi(p)[i][j] is
+    // d phi_j / d x_i (row = domain coordinate, column = codomain
+    // component), so result[i] = sum_j omega_j(phi(p)) * J[i][j].
+    // Pinned by test_differential's scaled-map case below.
     OneFormT<T> out;
     out.dim = omega.dim;
     out.comps.resize(omega.dim);
@@ -1942,16 +1981,14 @@ NP_NODISCARD inline ScalarFieldT<T> interior_product(const OneFormT<T> &omega, c
 }
 
 template <Scalar T = f64_t>
-NP_NODISCARD inline OneFormT<T> lie_derivative(const ScalarFieldT<T> &f, const std::vector<T> &X)
+NP_NODISCARD inline ScalarFieldT<T> lie_derivative(const ScalarFieldT<T> &f, const std::vector<T> &X)
 {
-    // L_X f = X(f) = df(X)
+    // L_X f = X(f) = df(X): a 0-form's Lie derivative is a 0-form.
+    // NOTE (honesty audit): an earlier revision wrapped the result as a
+    // OneForm with only comps[0] set (dropping dim-1 components and the
+    // wrong type). No in-repo callers depended on the wrong shape.
     auto df = exterior_derivative(f);
-    auto res = interior_product(df, X);
-    // Return as OneForm? For 0-form, Lie derivative is 0-form, but we wrap as OneForm for
-    // demo
-    OneFormT<T> out(f.dim);
-    out.comps[0] = res;
-    return out;
+    return interior_product(df, X);
 }
 
 // ── Helpers for variety de Rham ───────────────────────────────────────

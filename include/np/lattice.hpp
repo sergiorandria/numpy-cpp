@@ -13,7 +13,8 @@
  *     mobius, zeta, atoms/coatoms.
  *   - Factory `LatticeFactory` — cubic, hexagonal, A_n, D_n, E8, Leech stub.
  *   - Builder `LatticeBuilder<T>` fluent.
- *   - Strategies `IReductionStrategy<T>` — `LLLStrategy`, `BKZStrategy`.
+ *   - Strategies `IReductionStrategy<T>` — `LLLStrategy`, `WindowedLLLStrategy`
+ *     (sliding-window LLL; not full BKZ enumeration).
  *   - Visitor `LatticeVisitor<T>` for traversal, Observer `LatticeObserver`.
  *   - Decorator `TransformedLattice<T>` (rotated/scaled view).
  *   - Free ops `meet`, `join`, `dual`, `lll`, `gram`, `volume`, `shortest`.
@@ -50,6 +51,7 @@
 #include <span>
 #include <stdexcept>
 #include <string>
+#include <type_traits>
 #include <unordered_map>
 #include <variant>
 #include <vector>
@@ -116,16 +118,19 @@ template <LatticeScalar T = double> struct LLLStrategy : IReductionStrategy<T>
     }
 };
 
-template <LatticeScalar T = double> struct BKZStrategy : IReductionStrategy<T>
+// NOTE (honesty audit): an earlier revision named this BKZStrategy with a
+// "Full BKZ: blockwise LLL with enumeration" comment, but true BKZ
+// enumerates shortest vectors per block and this never does — it slides an
+// LLL window. Renamed to what it implements.
+template <LatticeScalar T = double> struct WindowedLLLStrategy : IReductionStrategy<T>
 {
     int block = 20;
     double delta = 0.75;
-    explicit BKZStrategy(int b = 20, double d = 0.75) : block(b), delta(d)
+    explicit WindowedLLLStrategy(int b = 20, double d = 0.75) : block(b), delta(d)
     {
     }
     Lattice<T> reduce(const Lattice<T> &lat) const override
     {
-        // Full BKZ: blockwise LLL with enumeration (simplified)
         int n = lat.rank();
         if (n <= block)
             return LLLStrategy<T>(delta).reduce(lat);
@@ -148,7 +153,7 @@ template <LatticeScalar T = double> struct BKZStrategy : IReductionStrategy<T>
     }
     NP_NODISCARD std::string name() const noexcept override
     {
-        return "BKZ(block=" + std::to_string(block) + ")";
+        return "WindowedLLL(block=" + std::to_string(block) + ")";
     }
 };
 
@@ -365,6 +370,12 @@ template <LatticeScalar T> struct Lattice
         det = sgn * det;
         if (det < 0)
             det = -det;
+        // NOTE (honesty audit): the double sqrt is rounded (not truncated)
+        // for integral T — truncation turned exact volumes like 25.0 into
+        // 24 on floating-point dust. Irrational volumes still cannot be
+        // represented in T; double lattices are unaffected.
+        if constexpr (std::is_integral_v<T>)
+            return static_cast<T>(std::llround(std::sqrt(det)));
         return static_cast<T>(std::sqrt(det));
     }
 
@@ -506,19 +517,9 @@ template <LatticeScalar T> struct Lattice
         int n = rank(), d = dim();
         if (v.size() != static_cast<size_t>(d))
             return false;
-        // For small n, brute force via solving linear system if square
-        if (n == d)
-        {
-            // Solve B^T? Actually basis rows are vectors, so v = sum c_i b_i => c = v *
-            // B^{-1} ? Build matrix B^T? Let's solve linear system B^T c = v? Wait B is n x
-            // d, c is 1 x n, v = c * B  =>  v^T = B^T c^T . So solve B^T x = v^T
-            ndarray<double> BT(std::vector<int>{d, n});
-            for (int i = 0; i < n; ++i)
-                for (int j = 0; j < d; ++j)
-                    BT(j, i) = static_cast<double>(basis(i, j));
-            // Solve via normal equations: (B B^T) c^T = B v^T? Simpler: use least squares via
-            // enumeration for small n
-        }
+        // NOTE (honesty audit): an earlier revision built a BT matrix here
+        // and discarded it unused before falling through. Removed; the
+        // closest-vector check below is the actual decision procedure.
         // Fallback: use closest vector and check distance
         auto c = closest_vector(v);
         double dist2 = 0;
@@ -545,7 +546,10 @@ template <LatticeScalar T> struct Lattice
         return strat.reduce(*this);
     }
 
-    // Shortest vector (exact enumeration for n <= 8, else LLL+enum)
+    // Shortest vector via bounded enumeration over small coefficients
+    // (NOTE: not exact in general — misses shortest vectors needing larger
+    // coefficients; exact only when the shortest vector happens to lie in
+    // the enumerated box).
     NP_NODISCARD ndarray<T> shortest_vector() const
     {
         int n = rank(), d = dim();
@@ -687,7 +691,9 @@ template <LatticeScalar T> struct Lattice
         return closest;
     }
 
-    // Meet (intersection) via dual of join of duals
+    // Meet (intersection) via dual of join of duals. NOTE (honesty audit):
+    // dual() inverts a floating-point Gram matrix, so this is approximate
+    // for ill-conditioned bases — an exact integer meet would need HNF/SNF.
     NP_NODISCARD Lattice<T> meet(const Lattice<T> &other) const
     {
         if (empty() || other.empty())
@@ -912,22 +918,27 @@ template <Ordered T> struct PosetLattice
 
     NP_NODISCARD bool is_modular() const
     {
+        // NOTE (honesty audit): an earlier revision computed the pieces
+        // below, discarded them with (void) casts, and returned true
+        // unconditionally. The modular law is now actually checked, mirroring
+        // is_distributive() (missing meets/joins skip, as there).
+        // check a ∨ (b ∧ c) == (a ∨ b) ∧ c whenever a ≤ c
         for (auto &a : elems)
             for (auto &b : elems)
                 for (auto &c : elems)
                 {
                     if (!leq(a, c))
                         continue;
-                    auto ajb = join(a, b);
-                    auto amb = meet(a, b);
-                    // need to check modular law: a ∨ (b ∧ c) == (a ∨ b) ∧ c when a ≤ c
                     auto bmc = meet(b, c);
-                    // ... simplified
-                    (void)ajb;
-                    (void)amb;
-                    (void)bmc;
+                    auto ajb = join(a, b);
+                    if (!bmc || !ajb)
+                        continue;
+                    auto left = join(a, *bmc);
+                    auto right = meet(*ajb, c);
+                    if (!left || !right || *left != *right)
+                        return false;
                 }
-        return true; // stub
+        return true;
     }
 
     NP_NODISCARD std::vector<std::pair<T, T>> hasse_diagram() const
