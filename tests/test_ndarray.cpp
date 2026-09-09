@@ -2,7 +2,10 @@
  * @file test_ndarray.cpp
  * @brief Core tests for np::ndarray.
  */
+#include <cmath>
+#include <complex>
 #include <cstdint>
+#include <limits>
 #include <sstream>
 
 #include "np/np.hpp"
@@ -203,6 +206,297 @@ int main()
         a.fill(true);
         test::check(a.sum() == 3, "bool sum");
         test::check(a.all() == true, "bool all");
+    }
+
+    // Negative indices (NumPy semantics)
+    {
+        np::ndarray<int> a{10, 20, 30};
+        test::check(a(-1) == 30 && a.at(-1) == 30, "negative 1-D index");
+        test::check(a[-1] == 30, "negative subscript");
+        np::ndarray<int> m{{1, 2}, {3, 4}};
+        test::check(m(-1, -1) == 4 && m.at(-2, 0) == 1, "negative 2-D index");
+        test::check(m[-1][-1] == 4, "negative chained subscript");
+        bool threw = false;
+        try
+        {
+            a(-4);
+        }
+        catch (const std::out_of_range &)
+        {
+            threw = true;
+        }
+        test::check(threw, "negative index out of bounds throws");
+    }
+
+    // Ragged nested double lists are rejected
+    {
+        bool threw = false;
+        try
+        {
+            np::ndarray<int> r{{1.0, 2.0}, {3.0}};
+            (void)r;
+        }
+        catch (const std::invalid_argument &)
+        {
+            threw = true;
+        }
+        test::check(threw, "ragged double init list throws");
+    }
+
+    // Span construction copies data
+    {
+        std::array<int, 4> raw{1, 2, 3, 4};
+        np::ndarray<int> a(std::span<const int>(raw), std::vector<int>{2, 2});
+        test::check(a(1, 1) == 4 && a.size() == 4, "span ctor");
+        bool threw = false;
+        try
+        {
+            np::ndarray<int> b(std::span<const int>(raw), std::vector<int>{3});
+            (void)b;
+        }
+        catch (const std::invalid_argument &)
+        {
+            threw = true;
+        }
+        test::check(threw, "span ctor size mismatch throws");
+    }
+
+    // In-place ops write through views and keep shape
+    {
+        np::ndarray<int> a{{1, 2}, {3, 4}};
+        auto t = a.transpose();
+        t += 10;
+        test::check(a(0, 1) == 12 && t.shape[0] == 2, "in-place writes through view");
+        np::ndarray<int> b{{1, 2}, {3, 4}};
+        np::ndarray<double> d{{0.5, 0.5}, {0.5, 0.5}};
+        b += d; // heterogeneous: converts
+        test::check(b(0, 0) == 1 && b(1, 1) == 4, "heterogeneous in-place add");
+        test::check((2.0 == b * 1.0)(0, 1) == true, "scalar-left comparison");
+        test::check((10 > b)(0, 0) == true, "scalar-left greater");
+    }
+
+    // True division promotes integral pairs to double (NumPy semantics)
+    {
+        np::ndarray<int> a{1, 2, 3, 4};
+        auto q = a / 2;
+        test::check(std::abs(q(0) - 0.5) < 1e-12 && std::abs(q(3) - 2.0) < 1e-12, "int/scalar promotes");
+        auto r = a / a;
+        test::check(std::abs(r(2) - 1.0) < 1e-12, "int/int promotes");
+        auto f = a.floordiv(2);
+        test::check(f(0) == 0 && f(3) == 2, "floordiv still floors");
+    }
+
+    // floored mod/div edge cases
+    {
+        test::check(np::detail::floored_mod(-4, 3) == 2, "floored mod negative");
+        test::check(np::detail::floored_div(-4, 3) == -2, "floored div negative");
+        test::check(np::detail::floored_mod(-4, 3u) == 2u, "mixed-sign mod");
+        bool threw = false;
+        try
+        {
+            (void)np::detail::floored_div(1, 0);
+        }
+        catch (const std::domain_error &)
+        {
+            threw = true;
+        }
+        test::check(threw, "integer divide by zero throws");
+        // Negative int exponents truncate (pinned repo contract, see test_math).
+        test::check(np::detail::power_elem(2, -1) == 0, "negative int power truncates");
+        test::check(np::detail::power_elem(2, 10) == 1024, "binary power");
+    }
+
+    // NaN propagation + complex guards
+    {
+        np::ndarray<double> a{1.0, std::numeric_limits<double>::quiet_NaN(), 2.0};
+        test::check(std::isnan(a.max()) && std::isnan(a.min()), "NaN propagates in min/max");
+        test::check(a.argmax() == 1, "NaN wins argmax");
+        np::ndarray<std::complex<double>> c(std::vector<int>{2});
+        c.fill({1.0, 2.0});
+        bool threw = false;
+        try
+        {
+            (void)c.min();
+        }
+        catch (const std::invalid_argument &)
+        {
+            threw = true;
+        }
+        test::check(threw, "complex min throws");
+        test::check(std::abs(c.mean().real() - 1.0) < 1e-12, "complex mean");
+        test::check(std::abs(c.var() - 0.0) < 1e-12, "complex var is real zero");
+        np::ndarray<std::complex<double>> d{{3.0, 1.0}, {1.0, 5.0}};
+        test::check(d.argsort(1)(0, 0) == 1, "complex argsort by real part");
+    }
+
+    // Empty-slice reductions
+    {
+        np::ndarray<int> e(std::vector<int>{2, 0});
+        bool threw = false;
+        try
+        {
+            (void)e.min(1);
+        }
+        catch (const std::invalid_argument &)
+        {
+            threw = true;
+        }
+        test::check(threw, "min of empty slice throws");
+        threw = false;
+        try
+        {
+            (void)e.argmax(1);
+        }
+        catch (const std::invalid_argument &)
+        {
+            threw = true;
+        }
+        test::check(threw, "argmax of empty slice throws");
+        auto s = e.sum(1); // seeded reductions yield identity
+        test::check(s.size() == 2 && s(0) == 0, "sum of empty slice is zero");
+        auto v = e.var(1);
+        test::check(std::isnan(v(0)), "var of empty slice is NaN");
+        bool cum_ok = true;
+        try
+        {
+            auto cs = e.cumsum(1);
+            cum_ok = cs.size() == 0;
+        }
+        catch (...)
+        {
+            cum_ok = false;
+        }
+        test::check(cum_ok, "cumsum of empty axis returns empty");
+    }
+
+    // diagonal(-1), abs(complex), round half-even
+    {
+        np::ndarray<int> a{{1, 2}, {3, 4}};
+        auto d = a.diagonal(-1);
+        test::check(d.size() == 1 && d(0) == 3, "diagonal(-1)");
+        test::check(a.trace(-1) == 3, "trace(-1)");
+        np::ndarray<std::complex<double>> c(std::vector<int>{2});
+        c.fill({3.0, 4.0});
+        auto m = c.abs();
+        test::check(std::abs(m(0) - 5.0) < 1e-12, "complex abs magnitude");
+        np::ndarray<double> r{2.5, 3.5, -2.5};
+        auto rd = r.round();
+        test::check(rd(0) == 2.0 && rd(1) == 4.0 && rd(2) == -2.0, "banker's rounding");
+    }
+
+    // Bool iteration + const access + sorting
+    {
+        np::ndarray<bool> a{true, false, true};
+        long n = 0;
+        for (bool v : a)
+            n += v ? 1 : 0;
+        test::check(n == 2, "range-for over bool array");
+        test::check(a.tolist().size() == 3, "bool tolist");
+        const auto &ca = a;
+        test::check(ca(0) == true && ca.at(2) == true, "const bool access");
+        np::ndarray<bool> b{true, false, true, false, false};
+        b.sort();
+        test::check(b(0) == false && b(4) == true, "bool sort");
+        test::check(b.argsort().size() == 5, "bool argsort runs");
+        auto by = a.tobytes();
+        test::check(by.size() == 3 && by[0] == 1 && by[1] == 0, "bool tobytes is 1 byte/elem");
+    }
+
+    // take/sorted/argsort None-flatten + templated searchsorted
+    {
+        np::ndarray<int> a{{3, 1}, {2, 0}};
+        auto t = a.take(std::vector<std::size_t>{0, 3}, std::nullopt);
+        test::check(t.size() == 2 && t(0) == 3 && t(1) == 0, "take(None) flattens");
+        auto s = a.sorted(std::nullopt);
+        test::check(s.size() == 4 && s(0) == 0 && s(3) == 3, "sorted(None) flattens");
+        auto o = a.argsort(std::nullopt);
+        test::check(o.size() == 4 && o(0) == 3, "argsort(None) flattens");
+        np::ndarray<double> d{1.0, 3.0, 5.0};
+        np::ndarray<double> needles{0.5, 4.0};
+        auto idx = d.searchsorted(needles);
+        test::check(idx(0) == 0 && idx(1) == 2, "searchsorted templated needles");
+        auto st = a.argsort(1); // stable ties keep input order
+        (void)st;
+        np::ndarray<int> ties{2, 1, 2};
+        auto so = ties.argsort();
+        test::check(so(0) == 1 && so(1) == 0 && so(2) == 2, "argsort stable ties");
+    }
+
+    // Validation errors
+    {
+        np::ndarray<int> a{1, 2, 3};
+        bool threw = false;
+        try
+        {
+            a.put(std::vector<std::size_t>{0}, std::vector<int>{9}); // ok
+            np::ndarray<int> e(std::vector<int>{0});
+            e.put(std::vector<std::size_t>{0}, std::vector<int>{9});
+        }
+        catch (const std::out_of_range &)
+        {
+            threw = true;
+        }
+        test::check(threw, "put into empty array throws");
+        threw = false;
+        try
+        {
+            a.resize(std::vector<int>{-1, 2});
+        }
+        catch (const std::invalid_argument &)
+        {
+            threw = true;
+        }
+        test::check(threw, "resize negative dim throws");
+        threw = false;
+        try
+        {
+            np::ndarray<int> e;
+            (void)e(0);
+        }
+        catch (const std::runtime_error &)
+        {
+            threw = true;
+        }
+        test::check(threw, "access on empty array throws");
+        threw = false;
+        try
+        {
+            np::ndarray<int> v{1, 2};
+            (void)(v << -1);
+        }
+        catch (const std::out_of_range &)
+        {
+            threw = true;
+        }
+        test::check(threw, "negative shift throws");
+        threw = false;
+        try
+        {
+            np::ndarray<int> v{{1, 2}, {3}};
+            (void)v;
+        }
+        catch (const std::invalid_argument &)
+        {
+            threw = true;
+        }
+        test::check(threw, "ragged init list still throws");
+    }
+
+    // tofile stream failure is reported
+    {
+        np::ndarray<int> a{1, 2, 3};
+        std::ostringstream os;
+        os.setstate(std::ios::badbit);
+        bool threw = false;
+        try
+        {
+            a.tofile(os);
+        }
+        catch (const std::runtime_error &)
+        {
+            threw = true;
+        }
+        test::check(threw, "tofile on bad stream throws");
     }
 
     return test::failures() ? 1 : 0;
