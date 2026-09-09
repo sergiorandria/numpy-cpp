@@ -581,6 +581,73 @@ int main()
         test::check(test::approx(linalg::norm(m, linalg::NormOrd::NegTwo), s1), "norm matrix -2");
     }
 
+    // --- norm with axis (matrix orders must not collapse to Frobenius) ------
+    {
+        ndarray<int> m{{1, 2}, {3, 4}};
+        // keepdims on empty axis fills the value (was zeros).
+        auto kd = linalg::norm(m, linalg::NormOrd::None, {}, true);
+        test::check(kd.shape.size() == 2 && test::approx(kd(0, 0), std::sqrt(30.0)), "norm keepdims fills");
+        // 2-tuple axis: matrix norms, not flattened vector norms.
+        auto o1 = linalg::norm(m, linalg::NormOrd::One, {0, 1});
+        test::check(test::approx(o1.data()[0], 6.0), "norm axis one = max col sum");
+        auto oi = linalg::norm(m, linalg::NormOrd::Inf, {0, 1});
+        test::check(test::approx(oi.data()[0], 7.0), "norm axis inf = max row sum");
+        const double s0 = std::sqrt(15.0 + std::sqrt(221.0));
+        auto o2 = linalg::norm(m, linalg::NormOrd::Two, {0, 1});
+        test::check(test::approx(o2.data()[0], s0), "norm axis two = spectral");
+        auto on = linalg::norm(m, linalg::NormOrd::Nuc, {0, 1});
+        const double s1 = std::sqrt(15.0 - std::sqrt(221.0));
+        test::check(test::approx(on.data()[0], s0 + s1), "norm axis nuc = trace norm");
+        // Single-axis vector orders still flatten correctly.
+        auto v1 = linalg::norm(m, linalg::NormOrd::One, {1});
+        test::check(v1.size() == 2 && test::approx(v1.data()[0], 3.0) && test::approx(v1.data()[1], 7.0),
+                    "norm single-axis one");
+        // Nuclear norm needs exactly 2 axes (NumPy raises otherwise).
+        bool threw = false;
+        try
+        {
+            (void)linalg::norm(m, linalg::NormOrd::Nuc, {0});
+        }
+        catch (const std::invalid_argument &)
+        {
+            threw = true;
+        }
+        test::check(threw, "norm nuc single axis throws");
+        // 3+ reduced axes always raise, even for None/Fro (verified vs NumPy).
+        threw = false;
+        try
+        {
+            ndarray<int> t3(std::vector<int>{2, 2, 2});
+            (void)linalg::norm(t3, linalg::NormOrd::None, {0, 1, 2});
+        }
+        catch (const std::invalid_argument &)
+        {
+            threw = true;
+        }
+        test::check(threw, "norm 3-tuple axes throws");
+        // 'fro' over 1 axis raises like NumPy; NegOne/NegTwo go per-slice.
+        threw = false;
+        try
+        {
+            (void)linalg::norm(m, linalg::NormOrd::Fro, {0});
+        }
+        catch (const std::invalid_argument &)
+        {
+            threw = true;
+        }
+        test::check(threw, "norm fro single axis throws");
+        auto n1 = linalg::norm(m, linalg::NormOrd::NegOne, {1});
+        test::check(n1.size() == 2 && test::approx(n1.data()[0], 2.0 / 3.0) && test::approx(n1.data()[1], 12.0 / 7.0),
+                    "norm negone single axis");
+        // Stacked 2x2x2: per-slice matrix norms.
+        ndarray<int> t(std::vector<int>{2, 2, 2});
+        for (int i = 0; i < 8; ++i)
+            t.data()[static_cast<std::size_t>(i)] = i + 1;
+        auto st = linalg::norm(t, linalg::NormOrd::One, {1, 2});
+        test::check(st.size() == 2 && test::approx(st.data()[0], 6.0) && test::approx(st.data()[1], 14.0),
+                    "norm stacked slices");
+    }
+
     // --- matrix_rank --------------------------------------------------------
 
     {
