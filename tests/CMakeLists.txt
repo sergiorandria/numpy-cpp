@@ -44,7 +44,8 @@ set(NP_TESTS
     test_bitwise
     test_window
     test_functional
-    test_indexing)
+    test_indexing
+    test_physics)
 
 if(NP_COMPILED_UNITS)
     list(APPEND NP_TESTS test_constexpr test_compile_time)
