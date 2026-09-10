@@ -919,10 +919,10 @@ NP_API template <detail::Numeric T> NP_NODISCARD auto square(const ndarray<T> &x
 {
     if constexpr (std::is_same_v<T, float> || std::is_same_v<T, double>)
     {
-        // TODO: transcendental ufuncs (sin, exp, log, ...) are NOT
+        // NOTE: transcendental ufuncs (sin, exp, log, ...) are deliberately NOT
         // vectorized here; they would require a vector math library
-        // (SLEEF/SVML). Only multiplication/division have kernels in
-        // np::simd, so square/divide are the SIMD fast paths.
+        // (SLEEF/SVML, see NP_ENABLE_SLEEF). Only multiplication/division
+        // have kernels in np::simd, so square/divide are the SIMD fast paths.
         if (x.is_contiguous())
         {
             ndarray<T> result(x.shape, x.type);
