@@ -17,7 +17,7 @@ jobs:
         run: cmake -S . -B build -DCMAKE_BUILD_TYPE=Release -DNP_WERROR=ON
       - name: Build
         run: cmake --build build -j8
-      - name: Test 38/38
+      - name: Test 49/49
         run: ctest --test-dir build --output-on-failure
       - name: Bench hardware (smoke)
         run: ./build/tests/bench_hardware || true
@@ -36,7 +36,7 @@ jobs:
             cmake_args: -DNP_ENABLE_SANITIZERS=ON -DNP_ENABLE_TSAN=OFF
             name: Undefined
           - sanitizer: tsan
-            cmake_args: -DNP_ENABLE_TSAN=ON -DNP_ENABLE_SANITIZERS=OFF -DNP_ENABLE_PQC=OFF -DNP_WERROR=OFF -DCMAKE_CXX_FLAGS="-Wno-error=tsan -Wno-error"
+            cmake_args: -DNP_ENABLE_TSAN=ON -DNP_ENABLE_SANITIZERS=OFF -DNP_ENABLE_PQC=OFF
             name: Thread
     steps:
       - uses: actions/checkout@v4
@@ -68,15 +68,25 @@ jobs:
 
   lint:
     runs-on: ubuntu-latest
-    continue-on-error: true
     steps:
       - uses: actions/checkout@v4
       - name: Install deps
         run: sudo apt-get update && sudo apt-get install -y clang-tidy libboost-all-dev
       - name: Configure (clang-tidy)
         run: cmake -S . -B build-tidy -DCMAKE_BUILD_TYPE=Release -DNP_ENABLE_TIDY=ON -DNP_WERROR=ON
-      - name: Build (tidy)
-        run: cmake --build build-tidy -j8 2>&1 | tee tidy.log; test ${PIPESTATUS[0]} -eq 0 || echo "tidy warnings (non-blocking)"
+      - name: Build (tidy, blocking)
+        run: cmake --build build-tidy -j8 2>&1 | tee tidy.log
+
+  format:
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+      - name: Install clang-format
+        run: sudo apt-get update && sudo apt-get install -y clang-format
+      - name: Check formatting
+        run: |
+          clang-format --version
+          git ls-files 'include/np/*.hpp' 'include/np/detail/*.hpp' 'include/np/fft/*.hpp' 'tests/*.cpp' | xargs clang-format --dry-run --Werror
 
   isabelle:
     runs-on: ubuntu-latest

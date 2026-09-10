@@ -2,7 +2,7 @@
 
 > **Scope:** 712+ distinct NumPy 2.2 routines + ~50 higher-math (homology/bundle/persistent/spectral), 36 topic groups. Every `np::` is a direct translation of the NumPy/Bott–Tu/Hatcher formula documented in `numpy-reference/reference/generated/numpy.<func>.html` with Doxygen `Reference:` link per function. This doc proves **correctness** (method = NumPy/spec) and **optimization equivalence** (fast path = slow path).
 
-*Branch `dev` — `91820ec` — `29/29 ctest`.*
+*Branch `dev` — `91820ec` — `29/29 ctest` at the time of writing (now 49/49; see `tests/CMakeLists.txt`).*
 
 ---
 
@@ -145,8 +145,8 @@ Every micro-opt obeys **pattern**: `if (is_contiguous() [[likely]]) { direct __r
 | `busday_count` | O(days) | O(1) week |
 | `isin` | O(n log m) | O(n) hash when m>64 |
 
-All 29 `ctest` still pass — empirical proof of equivalence.
+All 49 `ctest` still pass (29 at the time of writing) — empirical proof of equivalence.
 
 ---
 
-*Proofs are constructive: each `Reference: numpy-reference/...` in Doxygen maps 1-1 to NumPy spec; `dev` branch `git log --oneline` shows 0 stubs.*
+*Proofs are constructive: each `Reference: numpy-reference/...` in Doxygen maps 1-1 to NumPy spec; documented parity shims in `other.hpp` and default PQC wrappers are the only intentional stubs.*

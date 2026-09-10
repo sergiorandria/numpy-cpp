@@ -7,10 +7,12 @@
 [![Header-only](https://img.shields.io/badge/header--only-Yes-brightgreen?style=flat-square)](include/np/np.hpp)
 [![NumPy](https://img.shields.io/badge/NumPy-2.2-013243.svg?style=flat-square&logo=numpy)](https://numpy.org/doc/stable/)
 [![License](https://img.shields.io/badge/license-BSD--3--Clause-green?style=flat-square)](LICENSE)
-[![Tests](https://img.shields.io/badge/tests-22%2F22-brightgreen?style=flat-square)](#testing)
+[![Tests](https://img.shields.io/badge/tests-49%2F49-brightgreen?style=flat-square)](#testing)
 [![SIMD](https://img.shields.io/badge/SIMD-SSE4.2%20%7C%20AVX2%20%7C%20AVX--512%20%7C%20NEON%20%7C%20WASM%20%7C%20RVV-orange?style=flat-square)](#performance)
 
-**numpy-cpp** is a complete, header-only C++20 reimplementation of the NumPy 2.2 API — **760+ routines** across **36 modules**, **0 stubs**, with NumPy-identical semantics. Include one header, get the whole scientific stack at compiled speed.
+**numpy-cpp** is a complete, header-only C++20 reimplementation of the NumPy 2.2 API — **760+ routines** across **36 modules**, with NumPy-identical semantics. Include one header, get the whole scientific stack at compiled speed.
+
+> Parity shims: a handful of `numpy.distutils` / `ctypeslib` compat helpers in `other.hpp` are intentional thin stubs (documented in [Known Divergences](#known-divergences)), and optional PQC KEM/signature wrappers default to stubs unless `NP_PQC_ALG` is set. Everything in the NumPy surface above has a real implementation plus scalar fallback.
 
 ```cpp
 #include <np/np.hpp> // now fully integrated (random + concatenate included)
@@ -66,7 +68,7 @@ No linking. No Python runtime. No code generation. Just `#include <np/np.hpp>`.
 * **Zero-overhead** — header-only `INTERFACE` library (`cmake --install` just copies headers). Views are `shared_ptr` aliases, not copies. Contiguous fast paths use `memcpy` / direct `T* __restrict`.
 * **Portable SIMD** — auto-detected: SSE4.2 / AVX2 / AVX-512 on x86-64, NEON on ARM64, WASM SIMD128, RISC-V Vector, POWER VSX. Scalar fallback always correct.
 * **Two array engines** — `ndarray<T>` (dynamic, heap) + `ndarrayf<T, Extents...>` (fixed, stack, `constexpr`-foldable).
-* **Production-ready** — lock-free Chase-Lev threadpool, `29/29` CTest suites, `clang-format` enforced, BSD-3-Clause.
+* **Production-ready** — lock-free Chase-Lev threadpool, `49/49` CTest suites, `clang-format` enforced, BSD-3-Clause.
 
 > If you embed scientific computing in C++ — games, robotics, trading, edge inference — numpy-cpp lets you keep NumPy semantics without shipping Python.
 
@@ -88,7 +90,7 @@ No linking. No Python runtime. No code generation. Just `#include <np/np.hpp>`.
 - **I/O** — `load`, `save`, `savez`, `NpzFile`, `savetxt`, `DataSource`
 - **Polynomial** — `Polynomial`, `Chebyshev`, `polyfit`, `polyutils`
 - **Dtype & Masked** — `can_cast`, `promote_types`, `finfo`/`iinfo`, `MaskedArray`
-- **Extras** — `bigint` (Boost `cpp_int` / GMP), `pqc` constant-time hardening, `differential` LLVM JIT (optional), `homology`/`homotopy`/`manifold`/`variety`, `lattice`/`padic`, `neuromorphic` (Loihi2/SpiNNaker), `memory` (HBM/CXL), `tensor` (Hopper/AMX), `analog` (ReRAM), `photonics` (Mach-Zehnder), `quantum` (StateVector), `accelerator` (heterogeneous)
+- **Extras** — `bigint` (Boost `cpp_int` / GMP), `pqc` constant-time hardening (KEM/signature wrappers are opt-in stubs unless `NP_PQC_ALG` is set), `differential` LLVM JIT (optional, interpreter fallback), `homology`/`homotopy`/`manifold`/`variety`, `lattice`/`padic`, `neuromorphic` (CPU LIF simulation, no Loihi2/SpiNNaker hardware), `memory` (host storage with HBM/CXL placement *hints*, no device migration), `tensor` (blocked-CPU / FP32-GPU dispatch, FP8 is quantize-around-FP32, no Hopper/AMX tile path), `analog` (ReRAM crossbar simulation), `photonics` (Mach-Zehnder unitary math + simulation), `quantum` (in-house state-vector simulation), `accelerator` (heterogeneous CPU/GPU/sim dispatch)
 
 ---
 
@@ -331,7 +333,7 @@ docs/
   API.md              per-module file:line table
   CONTRIBUTING.md     workflow & style
   MATH_PROOFS.md      correctness proofs vs NumPy ref
-tests/                22 CTest suites + bench_math (AVX, manual)
+tests/                49 CTest suites + bench_math / bench_hardware (AVX, manual)
 ```
 
 ---
@@ -340,7 +342,7 @@ tests/                22 CTest suites + bench_math (AVX, manual)
 
 ```bash
 cmake -S . -B build && cmake --build build -j8
-ctest --test-dir build --output-on-failure   # 29/29
+ctest --test-dir build --output-on-failure   # 49/49
 
 #single suite verbose
 ./build/tests/test_ndarray --verbose
@@ -351,7 +353,7 @@ g++ -std=c++20 -I include tests/test_math.cpp -o /tmp/t && /tmp/t
 cmake --build build --target bench_math && ./build/tests/bench_math
 ```
 
-CI target is `29/29` green. Every fast path has a scalar fallback exercised by tests.
+CI target is `49/49` green. Every fast path has a scalar fallback exercised by tests.
 
 ---
 
@@ -375,7 +377,7 @@ Doxygen per function: `grep -n "Reference:" include/np/*.hpp`.
 1. Branch from `dev`: `git checkout -b feat/my-opt dev`
 2. Match NumPy signature exactly — check `numpy-reference/reference/generated/numpy.<func>.html`.
 3. Implement in `include/np/<module>.hpp` with Doxygen `Reference:` link.
-4. Format: `clang-format -i include/np/*.hpp` (`.clang-format`: 2-space, Allman, `ColumnLimit: 90`, `SortIncludes: Never`).
+4. Format: `clang-format -i include/np/*.hpp` (`.clang-format`: 4-space, Allman-style custom braces, `ColumnLimit: 120`).
 5. Add `tests/test_<module>.cpp` using `tests/test_util.hpp` (`test::check`, `test::approx`).
 6. Register in `tests/CMakeLists.txt` `NP_TESTS`.
 7. `cmake --build build && ctest --output-on-failure` — commit `feat(module): ...` with `file:line`.
@@ -389,7 +391,7 @@ See [`docs/CONTRIBUTING.md`](docs/CONTRIBUTING.md) and `AGENTS.md`.
 * `operator[](i,j)` is C++23 — use `arr(i,j)` or `arr[i][j]` proxy (`ndarray.hpp:3315`).
 * Complex `linalg` is real-only (`is_complex_v` static-assert) — dispatches to real `double`.
 * `ndarray<bool>` uses proxy reference (`vector<bool>` bitset); `is_contiguous()` aware.
-* `numpy.distutils` / `ctypeslib` are thin `other.hpp` stubs.
+* `numpy.distutils` / `ctypeslib` are thin `other.hpp` stubs (`who`, `disp`, `info`, `source`, `lookfor`, `deprecate`, `show_config`, buffer-size helpers) plus `einsum_path_stub` (real path logic lives in `linalg.hpp`). PQC KEM/signature wrappers are opt-in stubs unless `NP_PQC_ALG` selects a backend.
 
 ---
 
