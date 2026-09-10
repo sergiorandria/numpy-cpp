@@ -756,7 +756,9 @@ class Crossbar
         ProgramResult r{};
         // Write-and-verify with write noise; state dynamics optional per model
         std::mt19937_64 rng(config_.seed ^ 0xC0FFEEu);
-        std::normal_distribution<double> wn(0.0, config_.write_noise_std);
+        // NB: normal_distribution requires stddev > 0 at construction; the 1.0 fallback is never
+        // sampled (all uses are guarded by `write_noise_std > 0.0`).
+        std::normal_distribution<double> wn(0.0, config_.write_noise_std > 0.0 ? config_.write_noise_std : 1.0);
         for (int it = 0; it < opts.max_iters; ++it)
         {
             r.iters = it + 1;
@@ -816,7 +818,8 @@ class Crossbar
         if (static_cast<int>(x.size()) != n || static_cast<int>(grad.size()) != m)
             throw std::invalid_argument("outer_product_update: size mismatch");
         std::mt19937_64 rng(config_.seed ^ 0xBEEFu);
-        std::normal_distribution<double> wn(0.0, config_.write_noise_std);
+        // See program(): dummy stddev is never sampled (guarded by `write_noise_std > 0.0`).
+        std::normal_distribution<double> wn(0.0, config_.write_noise_std > 0.0 ? config_.write_noise_std : 1.0);
         for (int i = 0; i < n; ++i)
         {
             for (int j = 0; j < m; ++j)
@@ -1032,7 +1035,8 @@ class Crossbar
         if (cfg.read_noise_std == 0.0 && cfg.adc_bits == 0)
             return ideal;
         std::mt19937_64 rng(cfg.seed ^ 0xADC0u);
-        std::normal_distribution<double> nd(0.0, cfg.read_noise_std);
+        // Dummy stddev is never sampled (guarded by `read_noise_std > 0.0` below).
+        std::normal_distribution<double> nd(0.0, cfg.read_noise_std > 0.0 ? cfg.read_noise_std : 1.0);
         ndarray<float> out = ideal;
         double fs = 0.0;
         for (auto v : ideal.data())
@@ -1177,7 +1181,8 @@ class Crossbar
         const double norm = cfg.v_read * (unit_norm > 0.0 ? unit_norm : 1.0);
 
         std::mt19937_64 rng(cfg.seed ^ 0xBE4Du);
-        std::normal_distribution<double> rnd(0.0, cfg.read_noise_std);
+        // Dummy stddev is never sampled (guarded by `read_noise_std > 0.0` below).
+        std::normal_distribution<double> rnd(0.0, cfg.read_noise_std > 0.0 ? cfg.read_noise_std : 1.0);
         double fs = 0.0;
         std::vector<double> yraw(static_cast<std::size_t>(m));
         for (int j = 0; j < m; ++j)
