@@ -177,9 +177,8 @@ struct AutoAccelerator : IAccelerator
     }
     ndarray<float> matmul(const ndarray<float> &a, const ndarray<float> &b) override
     {
-        const std::uint64_t key = (a.ndim() == 2 && b.ndim() == 2)
-                                      ? size_class(a.size() * b.size())
-                                      : std::numeric_limits<std::uint64_t>::max();
+        const std::uint64_t key = (a.ndim() == 2 && b.ndim() == 2) ? size_class(a.size() * b.size())
+                                                                   : std::numeric_limits<std::uint64_t>::max();
         {
             std::lock_guard<std::mutex> lock(mtx_);
             auto it = winners_.find(key);

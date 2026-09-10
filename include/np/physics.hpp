@@ -752,8 +752,7 @@ struct NavierStokes3D
     NP_NODISCARD double kinetic_energy_simd() const
     {
         const auto &u = state.u, &v = state.v, &w = state.w;
-        if (u.is_contiguous() && v.is_contiguous() && w.is_contiguous() && u.shape == v.shape &&
-            u.shape == w.shape)
+        if (u.is_contiguous() && v.is_contiguous() && w.is_contiguous() && u.shape == v.shape && u.shape == w.shape)
         {
             if (u.size() == 0)
                 return 0.0;
@@ -1058,8 +1057,8 @@ NP_NODISCARD inline FluidState lattice_refine(const FluidState &s, double thresh
                 const int i1 = std::min(i0 + 1, s.nx - 1), j1 = std::min(j0 + 1, s.ny - 1);
                 const double fx = (i % 2 == 0) ? 0.0 : 0.5;
                 const double fy = (j % 2 == 0) ? 0.0 : 0.5;
-                g(j, i) = (1 - fx) * (1 - fy) * f(j0, i0) + fx * (1 - fy) * f(j0, i1) +
-                          (1 - fx) * fy * f(j1, i0) + fx * fy * f(j1, i1);
+                g(j, i) = (1 - fx) * (1 - fy) * f(j0, i0) + fx * (1 - fy) * f(j0, i1) + (1 - fx) * fy * f(j1, i0) +
+                          fx * fy * f(j1, i1);
             }
         }
         return g;
@@ -1082,9 +1081,7 @@ NP_NODISCARD inline FluidState3D lattice_refine(const FluidState3D &s, double th
     const double dx = 1.0 / static_cast<double>(s.nx - 1);
     const double dy = 1.0 / static_cast<double>(s.ny - 1);
     const double dz = 1.0 / static_cast<double>(s.nz - 1);
-    const auto at = [&](const ndarray<double> &f, int k, int j, int i) -> double {
-        return f(k, j, i);
-    };
+    const auto at = [&](const ndarray<double> &f, int k, int j, int i) -> double { return f(k, j, i); };
     double maxvort = 0.0;
     for (int k = 0; k < s.nz; ++k)
     {
@@ -1095,14 +1092,11 @@ NP_NODISCARD inline FluidState3D lattice_refine(const FluidState3D &s, double th
                 const int im = i > 0 ? i - 1 : i, ip = i + 1 < s.nx ? i + 1 : i;
                 const int jm = j > 0 ? j - 1 : j, jp = j + 1 < s.ny ? j + 1 : j;
                 const int km = k > 0 ? k - 1 : k, kp = k + 1 < s.nz ? k + 1 : k;
-                const double wx = (at(s.w, k, jp, i) - at(s.w, k, jm, i)) /
-                                      (static_cast<double>(jp - jm) * dy) -
+                const double wx = (at(s.w, k, jp, i) - at(s.w, k, jm, i)) / (static_cast<double>(jp - jm) * dy) -
                                   (at(s.v, kp, j, i) - at(s.v, km, j, i)) / (static_cast<double>(kp - km) * dz);
-                const double wy = (at(s.u, kp, j, i) - at(s.u, km, j, i)) /
-                                      (static_cast<double>(kp - km) * dz) -
+                const double wy = (at(s.u, kp, j, i) - at(s.u, km, j, i)) / (static_cast<double>(kp - km) * dz) -
                                   (at(s.w, k, j, ip) - at(s.w, k, j, im)) / (static_cast<double>(ip - im) * dx);
-                const double wz = (at(s.v, k, j, ip) - at(s.v, k, j, im)) /
-                                      (static_cast<double>(ip - im) * dx) -
+                const double wz = (at(s.v, k, j, ip) - at(s.v, k, j, im)) / (static_cast<double>(ip - im) * dx) -
                                   (at(s.u, k, jp, i) - at(s.u, k, jm, i)) / (static_cast<double>(jp - jm) * dy);
                 const double mag = std::sqrt(wx * wx + wy * wy + wz * wz);
                 if (mag > maxvort)
@@ -1132,10 +1126,8 @@ NP_NODISCARD inline FluidState3D lattice_refine(const FluidState3D &s, double th
                     const double fz = (k % 2 == 0) ? 0.0 : 0.5;
                     g(k, j, i) = (1 - fx) * (1 - fy) * (1 - fz) * at(f, k0, j0, i0) +
                                  fx * (1 - fy) * (1 - fz) * at(f, k0, j0, i1) +
-                                 (1 - fx) * fy * (1 - fz) * at(f, k0, j1, i0) +
-                                 fx * fy * (1 - fz) * at(f, k0, j1, i1) +
-                                 (1 - fx) * (1 - fy) * fz * at(f, k1, j0, i0) +
-                                 fx * (1 - fy) * fz * at(f, k1, j0, i1) +
+                                 (1 - fx) * fy * (1 - fz) * at(f, k0, j1, i0) + fx * fy * (1 - fz) * at(f, k0, j1, i1) +
+                                 (1 - fx) * (1 - fy) * fz * at(f, k1, j0, i0) + fx * (1 - fy) * fz * at(f, k1, j0, i1) +
                                  (1 - fx) * fy * fz * at(f, k1, j1, i0) + fx * fy * fz * at(f, k1, j1, i1);
                 }
             }
@@ -1149,14 +1141,14 @@ NP_NODISCARD inline FluidState3D lattice_refine(const FluidState3D &s, double th
     return out;
 }
 
-  // ── Additional viscous / inviscid fluid solvers ──
+// ── Additional viscous / inviscid fluid solvers ──
 
-  /**
-   * @brief 1D viscous Burgers equation on [0, L] with periodic boundaries:
-   *        du/dt + u du/dx = nu d²u/dx², explicit Euler + central differences.
-   */
-  struct Burgers1D
-  {
+/**
+ * @brief 1D viscous Burgers equation on [0, L] with periodic boundaries:
+ *        du/dt + u du/dx = nu d²u/dx², explicit Euler + central differences.
+ */
+struct Burgers1D
+{
     int nx = 0;
     ndarray<double> u;
     double nu = 0.01, dt = 0.001, L = 1.0;
@@ -1236,14 +1228,14 @@ NP_NODISCARD inline FluidState3D lattice_refine(const FluidState3D &s, double th
         }
         return s * dx();
     }
-  };
+};
 
-  /**
-   * @brief Coupled 2D Burgers system on the unit square, periodic in both axes:
-   *        du/dt + u du/dx + v du/dy = nu lap(u) (and symmetrically for v).
-   */
-  struct Burgers2D
-  {
+/**
+ * @brief Coupled 2D Burgers system on the unit square, periodic in both axes:
+ *        du/dt + u du/dx + v du/dy = nu lap(u) (and symmetrically for v).
+ */
+struct Burgers2D
+{
     int nx = 0, ny = 0;
     ndarray<double> u, v;
     double nu = 0.01, dt = 0.001;
@@ -1275,10 +1267,10 @@ NP_NODISCARD inline FluidState3D lattice_refine(const FluidState3D &s, double th
                 const double dudy = (u(jp, i) - u(jm, i)) / (2.0 * dy);
                 const double dvdx = (v(j, ip) - v(j, im)) / (2.0 * dx);
                 const double dvdy = (v(jp, i) - v(jm, i)) / (2.0 * dy);
-                const double lap_u = (u(j, ip) - 2.0 * uc + u(j, im)) / (dx * dx) +
-                                     (u(jp, i) - 2.0 * uc + u(jm, i)) / (dy * dy);
-                const double lap_v = (v(j, ip) - 2.0 * vc + v(j, im)) / (dx * dx) +
-                                     (v(jp, i) - 2.0 * vc + v(jm, i)) / (dy * dy);
+                const double lap_u =
+                    (u(j, ip) - 2.0 * uc + u(j, im)) / (dx * dx) + (u(jp, i) - 2.0 * uc + u(jm, i)) / (dy * dy);
+                const double lap_v =
+                    (v(j, ip) - 2.0 * vc + v(j, im)) / (dx * dx) + (v(jp, i) - 2.0 * vc + v(jm, i)) / (dy * dy);
                 un(j, i) = uc + dt * (-uc * dudx - vc * dudy + nu * lap_u);
                 vn(j, i) = vc + dt * (-uc * dvdx - vc * dvdy + nu * lap_v);
             }
@@ -1297,15 +1289,15 @@ NP_NODISCARD inline FluidState3D lattice_refine(const FluidState3D &s, double th
         }
         return m;
     }
-  };
+};
 
-  /**
-   * @brief 2D Stokes (creeping) flow on the unit square: like NavierStokes2D
-   *        but without the nonlinear advection term, for Re -> 0 regimes.
-   *        Same Chorin projection, same no-slip walls, reuses FluidState.
-   */
-  struct Stokes2D
-  {
+/**
+ * @brief 2D Stokes (creeping) flow on the unit square: like NavierStokes2D
+ *        but without the nonlinear advection term, for Re -> 0 regimes.
+ *        Same Chorin projection, same no-slip walls, reuses FluidState.
+ */
+struct Stokes2D
+{
     FluidState state;
     double Re = 1.0, dt = 0.01;
     int poisson_iters = 50;
@@ -1407,7 +1399,8 @@ NP_NODISCARD inline FluidState3D lattice_refine(const FluidState3D &s, double th
         {
             return 0.0;
         }
-        const double cell = 1.0 / static_cast<double>((nx > 1) ? nx - 1 : 1) / static_cast<double>((ny > 1) ? ny - 1 : 1);
+        const double cell =
+            1.0 / static_cast<double>((nx > 1) ? nx - 1 : 1) / static_cast<double>((ny > 1) ? ny - 1 : 1);
         double ke = 0.0;
         for (std::size_t n = 0; n < state.u.size(); ++n)
         {
@@ -1453,22 +1446,22 @@ NP_NODISCARD inline FluidState3D lattice_refine(const FluidState3D &s, double th
             f(j, nx - 1) = 0.0;
         }
     }
-  };
+};
 
-  /// Velocity field (u, v) pair returned by PotentialFlow2D::velocity().
-  struct FlowField2D
-  {
+/// Velocity field (u, v) pair returned by PotentialFlow2D::velocity().
+struct FlowField2D
+{
     ndarray<double> u, v;
-  };
+};
 
-  /**
-   * @brief 2D potential flow on the unit square: solves lap(phi) = 0 with a
-   *        uniform freestream (phi = U*x on inlet/outlet, dp/dn = 0 top/bottom).
-   *        Velocity follows as u = grad(phi); phi = U*x is the exact discrete
-   *        solution, so convergence to (U, 0) validates the Laplace solver.
-   */
-  struct PotentialFlow2D
-  {
+/**
+ * @brief 2D potential flow on the unit square: solves lap(phi) = 0 with a
+ *        uniform freestream (phi = U*x on inlet/outlet, dp/dn = 0 top/bottom).
+ *        Velocity follows as u = grad(phi); phi = U*x is the exact discrete
+ *        solution, so convergence to (U, 0) validates the Laplace solver.
+ */
+struct PotentialFlow2D
+{
     int nx = 0, ny = 0;
     ndarray<double> phi;
     double U = 1.0;
@@ -1495,9 +1488,8 @@ NP_NODISCARD inline FluidState3D lattice_refine(const FluidState3D &s, double th
             {
                 for (int i = 1; i < nx - 1; ++i)
                 {
-                    pn(j, i) = ((phi(j, i + 1) + phi(j, i - 1)) * dy * dy +
-                                (phi(j + 1, i) + phi(j - 1, i)) * dx * dx) /
-                               denom;
+                    pn(j, i) =
+                        ((phi(j, i + 1) + phi(j, i - 1)) * dy * dy + (phi(j + 1, i) + phi(j - 1, i)) * dx * dx) / denom;
                 }
             }
             for (int j = 0; j < ny; ++j)
@@ -1533,29 +1525,28 @@ NP_NODISCARD inline FluidState3D lattice_refine(const FluidState3D &s, double th
         }
         return out;
     }
-  };
+};
 
-  /// Centroid (x, y) of a scalar field, e.g. for tracking advected pulses.
-  struct Centroid
-  {
+/// Centroid (x, y) of a scalar field, e.g. for tracking advected pulses.
+struct Centroid
+{
     double x = 0.0, y = 0.0;
-  };
+};
 
-  /**
-   * @brief 2D scalar advection-diffusion on the unit square with a prescribed
-   *        uniform velocity (ax, ay): dT/dt + a·grad(T) = kappa lap(T).
-   *        Upwind advection (stable for any flow direction) + central diffusion,
-   *        Dirichlet walls fixed at bc.
-   */
-  struct AdvectionDiffusion2D
-  {
+/**
+ * @brief 2D scalar advection-diffusion on the unit square with a prescribed
+ *        uniform velocity (ax, ay): dT/dt + a·grad(T) = kappa lap(T).
+ *        Upwind advection (stable for any flow direction) + central diffusion,
+ *        Dirichlet walls fixed at bc.
+ */
+struct AdvectionDiffusion2D
+{
     int nx = 0, ny = 0;
     ndarray<double> T;
     double ax = 1.0, ay = 0.0, kappa = 0.0, dt = 0.001, bc = 0.0;
 
     AdvectionDiffusion2D() = default;
-    AdvectionDiffusion2D(int nx_, int ny_, double ax_ = 1.0, double ay_ = 0.0, double kappa_ = 0.0,
-                         double dt_ = 0.001)
+    AdvectionDiffusion2D(int nx_, int ny_, double ax_ = 1.0, double ay_ = 0.0, double kappa_ = 0.0, double dt_ = 0.001)
         : nx(nx_), ny(ny_), T(std::vector<int>{ny_, nx_}), ax(ax_), ay(ay_), kappa(kappa_), dt(dt_)
     {
     }
@@ -1649,17 +1640,17 @@ NP_NODISCARD inline FluidState3D lattice_refine(const FluidState3D &s, double th
         }
         return c;
     }
-  };
+};
 
-  // ── Heat transfer ──
+// ── Heat transfer ──
 
-  /**
-   * @brief 2D heat equation on the unit square: dT/dt = alpha lap(T),
-   *        explicit FTCS with Dirichlet walls fixed at bc. The step is
-   *        clamped to the diffusive stability limit (see stable_dt()).
-   */
-  struct Heat2D
-  {
+/**
+ * @brief 2D heat equation on the unit square: dT/dt = alpha lap(T),
+ *        explicit FTCS with Dirichlet walls fixed at bc. The step is
+ *        clamped to the diffusive stability limit (see stable_dt()).
+ */
+struct Heat2D
+{
     int nx = 0, ny = 0;
     ndarray<double> T;
     double alpha = 0.01, dt = 0.01, bc = 0.0;
@@ -1752,14 +1743,14 @@ NP_NODISCARD inline FluidState3D lattice_refine(const FluidState3D &s, double th
         }
         return m;
     }
-  };
+};
 
-  /**
-   * @brief 3D heat equation on the unit cube: dT/dt = alpha lap(T),
-   *        explicit FTCS with Dirichlet walls fixed at bc. Storage (k, j, i).
-   */
-  struct Heat3D
-  {
+/**
+ * @brief 3D heat equation on the unit cube: dT/dt = alpha lap(T),
+ *        explicit FTCS with Dirichlet walls fixed at bc. Storage (k, j, i).
+ */
+struct Heat3D
+{
     int nx = 0, ny = 0, nz = 0;
     ndarray<double> T;
     double alpha = 0.01, dt = 0.01, bc = 0.0;
@@ -1857,17 +1848,17 @@ NP_NODISCARD inline FluidState3D lattice_refine(const FluidState3D &s, double th
         }
         return m;
     }
-  };
+};
 
-  /**
-   * @brief 2D Boussinesq natural convection on the unit square: Navier-Stokes
-   *        plus a temperature field with buoyancy beta*g*(T - T_ref) forcing
-   *        the vertical momentum. Hot bottom wall (T_hot), cold top (T_cold),
-   *        side walls follow the linear conduction profile. No-slip velocity
-   *        walls, Chorin projection shared with NavierStokes2D.
-   */
-  struct Boussinesq2D
-  {
+/**
+ * @brief 2D Boussinesq natural convection on the unit square: Navier-Stokes
+ *        plus a temperature field with buoyancy beta*g*(T - T_ref) forcing
+ *        the vertical momentum. Hot bottom wall (T_hot), cold top (T_cold),
+ *        side walls follow the linear conduction profile. No-slip velocity
+ *        walls, Chorin projection shared with NavierStokes2D.
+ */
+struct Boussinesq2D
+{
     FluidState state;
     ndarray<double> T;
     double Re = 100.0, alpha_T = 0.01, beta = 0.5, gravity = 1.0;
@@ -1876,8 +1867,7 @@ NP_NODISCARD inline FluidState3D lattice_refine(const FluidState3D &s, double th
     int poisson_iters = 50;
 
     Boussinesq2D() = default;
-    Boussinesq2D(int nx, int ny, double Re_ = 100.0)
-        : state(nx, ny), T(std::vector<int>{ny, nx}), Re(Re_)
+    Boussinesq2D(int nx, int ny, double Re_ = 100.0) : state(nx, ny), T(std::vector<int>{ny, nx}), Re(Re_)
     {
         reset_conduction();
     }
@@ -2016,8 +2006,7 @@ NP_NODISCARD inline FluidState3D lattice_refine(const FluidState3D &s, double th
         double m = 0.0;
         for (std::size_t n = 0; n < state.u.size(); ++n)
         {
-            const double s =
-                std::sqrt(state.u.data()[n] * state.u.data()[n] + state.v.data()[n] * state.v.data()[n]);
+            const double s = std::sqrt(state.u.data()[n] * state.u.data()[n] + state.v.data()[n] * state.v.data()[n]);
             m = std::max(m, s);
         }
         return m;
@@ -2050,30 +2039,30 @@ NP_NODISCARD inline FluidState3D lattice_refine(const FluidState3D &s, double th
             f(j, nx - 1) = side;
         }
     }
-  };
+};
 
-  // ── Ballistics ──
+// ── Ballistics ──
 
-  /// Point-mass state for Projectile (x, y, vx, vy, t).
-  struct ProjectileState
-  {
+/// Point-mass state for Projectile (x, y, vx, vy, t).
+struct ProjectileState
+{
     double x = 0.0, y = 0.0, vx = 0.0, vy = 0.0, t = 0.0;
-  };
+};
 
-  /// One recorded sample of a projectile trajectory.
-  struct TrajPoint
-  {
+/// One recorded sample of a projectile trajectory.
+struct TrajPoint
+{
     double x = 0.0, y = 0.0, t = 0.0;
-  };
+};
 
-  /**
-   * @brief 2D projectile with gravity, quadratic air drag and headwind:
-   *        a = -g ŷ - k*|v - w|*(v - w), with lumped k = drag/mass and
-   *        wind (wind_x, 0). Integrated with classic RK4; simulate() runs
-   *        from the origin until ground impact (y < 0, linearly interpolated).
-   */
-  struct Projectile
-  {
+/**
+ * @brief 2D projectile with gravity, quadratic air drag and headwind:
+ *        a = -g ŷ - k*|v - w|*(v - w), with lumped k = drag/mass and
+ *        wind (wind_x, 0). Integrated with classic RK4; simulate() runs
+ *        from the origin until ground impact (y < 0, linearly interpolated).
+ */
+struct Projectile
+{
     double g = 9.81, drag = 0.0, wind_x = 0.0;
 
     Projectile() = default;
@@ -2103,8 +2092,7 @@ NP_NODISCARD inline FluidState3D lattice_refine(const FluidState3D &s, double th
     }
 
     /// Launch at speed v0 / angle and record until ground impact.
-    NP_NODISCARD std::vector<TrajPoint> simulate(double v0, double angle_rad, double dt,
-                                                 double tmax = 100.0) const
+    NP_NODISCARD std::vector<TrajPoint> simulate(double v0, double angle_rad, double dt, double tmax = 100.0) const
     {
         ProjectileState s;
         s.vx = v0 * std::cos(angle_rad);
@@ -2144,22 +2132,23 @@ NP_NODISCARD inline FluidState3D lattice_refine(const FluidState3D &s, double th
         const double vy = v0 * std::sin(angle_rad);
         return vy * vy / (2.0 * g);
     }
-  };
+};
 
-  // ── Waves and classical mechanics ──
+// ── Waves and classical mechanics ──
 
-  /**
-   * @brief 1D wave equation on [0, L] with fixed ends: d²u/dt² = c² d²u/dx²,
-   *        leapfrog in time + central differences in space (CFL c*dt/dx <= 1).
-   */
-  struct Wave1D
-  {
+/**
+ * @brief 1D wave equation on [0, L] with fixed ends: d²u/dt² = c² d²u/dx²,
+ *        leapfrog in time + central differences in space (CFL c*dt/dx <= 1).
+ */
+struct Wave1D
+{
     int n = 0;
     ndarray<double> u, u_prev;
     double c = 1.0, dt = 0.001, L = 1.0;
 
     Wave1D() = default;
-    Wave1D(int n_, double c_ = 1.0, double dt_ = 0.001) : n(n_), u(std::vector<int>{n_}), u_prev(std::vector<int>{n_}), c(c_), dt(dt_)
+    Wave1D(int n_, double c_ = 1.0, double dt_ = 0.001)
+        : n(n_), u(std::vector<int>{n_}), u_prev(std::vector<int>{n_}), c(c_), dt(dt_)
     {
     }
 
@@ -2227,14 +2216,14 @@ NP_NODISCARD inline FluidState3D lattice_refine(const FluidState3D &s, double th
         }
         return m;
     }
-  };
+};
 
-  /**
-   * @brief 2D wave equation on the unit square with fixed walls, leapfrog
-   *        in time (CFL c*dt*sqrt(1/dx² + 1/dy²) <= 1).
-   */
-  struct Wave2D
-  {
+/**
+ * @brief 2D wave equation on the unit square with fixed walls, leapfrog
+ *        in time (CFL c*dt*sqrt(1/dx² + 1/dy²) <= 1).
+ */
+struct Wave2D
+{
     int nx = 0, ny = 0;
     ndarray<double> u, u_prev;
     double c = 1.0, dt = 0.001;
@@ -2292,14 +2281,14 @@ NP_NODISCARD inline FluidState3D lattice_refine(const FluidState3D &s, double th
         }
         return m;
     }
-  };
+};
 
-  /**
-   * @brief Undamped harmonic oscillator m d²x/dt² = -k x, velocity Verlet
-   *        (symplectic: energy oscillates around the true value, no drift).
-   */
-  struct HarmonicOscillator
-  {
+/**
+ * @brief Undamped harmonic oscillator m d²x/dt² = -k x, velocity Verlet
+ *        (symplectic: energy oscillates around the true value, no drift).
+ */
+struct HarmonicOscillator
+{
     double m = 1.0, k = 1.0, x = 1.0, v = 0.0;
 
     HarmonicOscillator() = default;
@@ -2324,13 +2313,13 @@ NP_NODISCARD inline FluidState3D lattice_refine(const FluidState3D &s, double th
     {
         return 2.0 * M_PI * std::sqrt(m / k);
     }
-  };
+};
 
-  /**
-   * @brief Nonlinear planar pendulum d²θ/dt² = -(g/L) sin θ, classic RK4.
-   */
-  struct Pendulum
-  {
+/**
+ * @brief Nonlinear planar pendulum d²θ/dt² = -(g/L) sin θ, classic RK4.
+ */
+struct Pendulum
+{
     double L = 1.0, g = 9.81, theta = 0.1, omega = 0.0;
 
     Pendulum() = default;
@@ -2360,14 +2349,14 @@ NP_NODISCARD inline FluidState3D lattice_refine(const FluidState3D &s, double th
     {
         return 2.0 * M_PI * std::sqrt(L / g);
     }
-  };
+};
 
-  /**
-   * @brief Gravitational N-body system in 3D with Plummer softening,
-   *        integrated with velocity Verlet (symplectic, momentum-conserving).
-   */
-  struct NBody
-  {
+/**
+ * @brief Gravitational N-body system in 3D with Plummer softening,
+ *        integrated with velocity Verlet (symplectic, momentum-conserving).
+ */
+struct NBody
+{
     std::vector<std::array<double, 3>> pos, vel;
     std::vector<double> mass;
     double G = 1.0, softening = 1.0e-3;
@@ -2471,9 +2460,9 @@ NP_NODISCARD inline FluidState3D lattice_refine(const FluidState3D &s, double th
         }
         return p;
     }
-  };
+};
 
-  // p-adic hook (for Re = p-adic valuation test)
+// p-adic hook (for Re = p-adic valuation test)
 NP_NODISCARD inline bool is_padic_unit_Re(double Re, int p = 5)
 {
     // Re is a unit in Q_p iff its valuation is 0. NOTE (honesty audit): an

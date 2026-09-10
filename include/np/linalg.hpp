@@ -4306,9 +4306,8 @@ NP_NODISCARD auto norm(const ndarray<T> &x, NormOrd ord, const std::vector<int> 
     {
         throw std::invalid_argument("norm: Invalid norm order 'fro' for vectors");
     }
-    const bool need_slices =
-        (red_axes.size() == 2 && ord != NormOrd::None) ||
-        (red_axes.size() == 1 && (ord == NormOrd::NegOne || ord == NormOrd::NegTwo));
+    const bool need_slices = (red_axes.size() == 2 && ord != NormOrd::None) ||
+                             (red_axes.size() == 1 && (ord == NormOrd::NegOne || ord == NormOrd::NegTwo));
     std::vector<int> out_shape;
     std::vector<std::size_t> out_pos(nd, 0);
     for (std::size_t i = 0; i < nd; ++i)
@@ -4337,10 +4336,9 @@ NP_NODISCARD auto norm(const ndarray<T> &x, NormOrd ord, const std::vector<int> 
         {
             slice_shape.push_back(x.shape[r]);
         }
-        const std::size_t slice_n = red_axes.size() == 2
-                                        ? static_cast<std::size_t>(x.shape[red_axes[0]]) *
-                                              static_cast<std::size_t>(x.shape[red_axes[1]])
-                                        : static_cast<std::size_t>(x.shape[red_axes[0]]);
+        const std::size_t slice_n = red_axes.size() == 2 ? static_cast<std::size_t>(x.shape[red_axes[0]]) *
+                                                               static_cast<std::size_t>(x.shape[red_axes[1]])
+                                                         : static_cast<std::size_t>(x.shape[red_axes[0]]);
         while (!odo.done())
         {
             const auto &oidx = odo.idx();

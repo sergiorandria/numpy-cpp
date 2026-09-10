@@ -129,8 +129,8 @@ struct MemoryFactory
     {
         return ManagedHintArray<T>(a);
     }
-    template <typename T> NP_NODISCARD static std::variant<HbmHintArray<T>, DeviceHintArray<T>> powerful(
-      const ndarray<T> &a)
+    template <typename T>
+    NP_NODISCARD static std::variant<HbmHintArray<T>, DeviceHintArray<T>> powerful(const ndarray<T> &a)
     {
         if (gpu::is_available())
             return DeviceHintArray<T>(a);

@@ -67,7 +67,6 @@ template <typename T> inline void require_unit_interval(T p, const char *what)
 }
 } // namespace detail
 
-
 /**
  * @brief Random number generator (NumPy Generator API equivalent).
  *

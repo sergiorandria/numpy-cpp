@@ -13,8 +13,8 @@ int main()
     using np::ma::count;
     using np::ma::count_axis;
     using np::ma::dot;
-    using np::ma::put;
     using np::ma::MaskedArray;
+    using np::ma::put;
 
     // count() scalar total; count_axis() per-axis array.
     {

@@ -41,8 +41,7 @@ int main()
         // skew-symmetric with det ±1 (unimodular). The old hardcoded
         // diagonal-1 fails the skew check.
         auto PT = poincare_pairing(T2);
-        bool skew = PT.shape[0] == 2 && PT.shape[1] == 2 && PT(0, 0) == 0 && PT(1, 1) == 0 &&
-                    PT(0, 1) == -PT(1, 0);
+        bool skew = PT.shape[0] == 2 && PT.shape[1] == 2 && PT(0, 0) == 0 && PT(1, 1) == 0 && PT(0, 1) == -PT(1, 0);
         test::check(skew, "poincare T2 skew");
         if (skew)
         {

@@ -1401,8 +1401,7 @@ NP_NODISCARD inline std::vector<std::vector<double>> cov_from_rows(const std::ve
     // the NaN values below match, minus the warning.
     if (static_cast<long long>(k) <= static_cast<long long>(ddof))
     {
-        std::vector<std::vector<double>> nan(n, std::vector<double>(
-                                                     n, std::numeric_limits<double>::quiet_NaN()));
+        std::vector<std::vector<double>> nan(n, std::vector<double>(n, std::numeric_limits<double>::quiet_NaN()));
         return nan;
     }
     const double normalizer = static_cast<double>(k - ddof);
@@ -1857,8 +1856,7 @@ NP_NODISCARD auto mean(const ndarray<T> &a, int axis, bool keepdims = false) -> 
 
 /** @brief Variance of all elements (NumPy default ddof=0). */
 NP_API template <typename T> NP_NODISCARD auto var_ddof(const ndarray<T> &a, int ddof) -> typename _mean_type<T>::type;
-NP_API template <typename T>
-NP_NODISCARD auto var(const ndarray<T> &a, int ddof = 0) -> typename _mean_type<T>::type
+NP_API template <typename T> NP_NODISCARD auto var(const ndarray<T> &a, int ddof = 0) -> typename _mean_type<T>::type
 {
     return var_ddof(a, ddof);
 }
@@ -1874,8 +1872,7 @@ NP_NODISCARD auto var(const ndarray<T> &a, int axis, bool keepdims, int ddof) ->
 }
 
 /** @brief Std dev of all elements (NumPy default ddof=0). */
-NP_API template <typename T>
-NP_NODISCARD auto std(const ndarray<T> &a, int ddof = 0) -> typename _mean_type<T>::type
+NP_API template <typename T> NP_NODISCARD auto std(const ndarray<T> &a, int ddof = 0) -> typename _mean_type<T>::type
 {
     return static_cast<typename _mean_type<T>::type>(std::sqrt(static_cast<long double>(var(a, ddof))));
 }

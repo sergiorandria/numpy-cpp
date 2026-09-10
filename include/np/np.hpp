@@ -10,6 +10,7 @@
 #ifndef NP_NP_HPP
 #define NP_NP_HPP
 
+#include "accelerator.hpp"
 #include "api_macros.hpp"
 #include "bigint.hpp"
 #include "bitwise.hpp"
@@ -37,7 +38,6 @@
 #include "lattice.hpp"
 #include "linalg.hpp"
 #include "linalg_fixed.hpp"
-#include "accelerator.hpp"
 #include "logic.hpp"
 #include "manifold.hpp"
 #include "manipulation.hpp"
