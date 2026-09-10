@@ -364,7 +364,9 @@ inline std::vector<capability_entry> &capability_cache()
 } // namespace detail
 
 // Cached capability query keyed by device index (thread-safe). Falls back
-// to an uncached probe if the cache itself cannot be maintained.
+// to an uncached probe if the cache itself cannot be maintained (e.g. mutex
+// or vector allocation failure — must not throw: this function is noexcept,
+// so every exception path degrades to a direct probe returning false).
 NP_NODISCARD inline bool cached_compute_capability(int device, int &major, int &minor) noexcept
 {
     major = 0;
@@ -396,8 +398,15 @@ NP_NODISCARD inline bool cached_compute_capability(int device, int &major, int &
         minor = min;
         return ok;
     }
+    catch (const std::exception &)
+    {
+        // Cache maintenance failed (mutex/vector); fall through to a direct
+        // noexcept probe so capability queries degrade instead of throwing.
+        return device_compute_capability(device, major, minor);
+    }
     catch (...)
     {
+        // Non-std exception (e.g. corrupt cache state); same degradation.
         return device_compute_capability(device, major, minor);
     }
 }

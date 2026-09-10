@@ -659,8 +659,11 @@ NP_API inline auto datetime64_from_string(const std::string &s) -> sys_days
         m = std::stoi(s.substr(5, 2));
         d = std::stoi(s.substr(8, 2));
     }
-    catch (...)
+    catch (const std::exception &)
     {
+        // std::stoi throws invalid_argument/out_of_range for non-numeric
+        // input; normalize to invalid_argument with the offending string so
+        // callers get a recoverable, diagnosable error (never swallowed).
         throw std::invalid_argument("datetime64_from_string: invalid date '" + s + "'");
     }
     using namespace std::chrono;
@@ -849,8 +852,11 @@ NP_API inline auto datetime_data(const std::string &dtype_str) -> std::pair<std:
         {
             count = std::stoi(num);
         }
-        catch (...)
+        catch (const std::exception &)
         {
+            // NumPy parity: a malformed repeat count in a dtype string is not
+            // fatal — fall back to 1 (documented intentional default, not a
+            // swallowed error; invalid_argument/out_of_range both land here).
             count = 1;
         }
         if (count <= 0)
