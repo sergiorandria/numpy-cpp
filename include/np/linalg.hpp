@@ -1893,13 +1893,7 @@ template <typename T, typename U>
     requires(np::detail::is_bigint_v<T> || np::detail::is_bigint_v<U>)
 NP_NODISCARD auto solve(const ndarray<T> &a, const ndarray<U> &b) -> ndarray<double>
 {
-    auto ad = [&] {
-        if constexpr (np::detail::is_bigint_v<T>)
-            return from_bigint<double>(a);
-        else
-            return ndarray<double>(a.shape, dtype::float64, 0.0); // placeholder, will use as_bigint conversion?
-    }();
-    // Actually for mixed bigint/double, convert both to double
+    // Mixed bigint/double: convert both operands to double, then use double solve.
     ndarray<double> ad2, bd2;
     if constexpr (np::detail::is_bigint_v<T>)
         ad2 = from_bigint<double>(a);
