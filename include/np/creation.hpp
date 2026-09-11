@@ -18,6 +18,11 @@
 
 #include <array>
 #include <cmath>
+
+// Array creation defaults (macros, no magic numbers in logic)
+#define NP_CREATION_DEFAULT_NUM 50
+#define NP_CREATION_LOG_BASE 10
+#define NP_CREATION_GEOM_BASE 10.0
 #include <concepts>
 #include <cstddef>
 #include <initializer_list>
@@ -528,7 +533,7 @@ NP_API template <typename T> NP_NODISCARD auto arange(T stop) -> ndarray<T>
  * Reference: numpy-reference/reference/generated/numpy.linspace.html
  */
 NP_API template <typename T>
-NP_NODISCARD auto linspace(T start, T stop, std::size_t num = 50, bool endpoint = true)
+NP_NODISCARD auto linspace(T start, T stop, std::size_t num = NP_CREATION_DEFAULT_NUM, bool endpoint = true)
     -> ndarray<std::conditional_t<std::is_floating_point_v<T>, T, double>>
 {
     using R = std::conditional_t<std::is_floating_point_v<T>, T, double>;
@@ -567,7 +572,8 @@ NP_NODISCARD auto linspace(T start, T stop, std::size_t num = 50, bool endpoint 
  * Reference: numpy-reference/reference/generated/numpy.logspace.html
  */
 NP_API template <typename T>
-NP_NODISCARD auto logspace(T start, T stop, std::size_t num = 50, T base = T{10}) -> ndarray<double>
+NP_NODISCARD auto logspace(T start, T stop, std::size_t num = NP_CREATION_DEFAULT_NUM, T base = T{NP_CREATION_LOG_BASE})
+    -> ndarray<double>
 {
     auto powers = linspace(start, stop, num);
     ndarray<double> out(std::vector<int>{static_cast<int>(num)});
@@ -742,7 +748,8 @@ NP_NODISCARD auto asarray(const std::vector<T> &values, const std::vector<int> &
  * Reference: numpy-reference/reference/generated/numpy.geomspace.html
  */
 NP_API template <typename T>
-NP_NODISCARD auto geomspace(T start, T stop, std::size_t num = 50, bool endpoint = true) -> ndarray<double>
+NP_NODISCARD auto geomspace(T start, T stop, std::size_t num = NP_CREATION_DEFAULT_NUM, bool endpoint = true)
+    -> ndarray<double>
 {
     if (num == 0)
     {
@@ -766,7 +773,7 @@ NP_NODISCARD auto geomspace(T start, T stop, std::size_t num = 50, bool endpoint
     ndarray<double> out(std::vector<int>{static_cast<int>(num)});
     for (std::size_t i = 0; i < num; ++i)
     {
-        double v = std::pow(10.0, p.data()[i]);
+        double v = std::pow(NP_CREATION_GEOM_BASE, p.data()[i]);
         out.data()[i] = neg ? -v : v;
     }
     return out;
@@ -1387,6 +1394,14 @@ NP_API inline auto unravel_index(const ndarray<int> &indices, const std::vector<
 {
     if (dims.empty())
         throw std::invalid_argument("unravel_index: dims empty");
+    // NOTE (honesty audit): an earlier revision multiplied unchecked dims
+    // here, so a negative dim wrapped to a huge size_t and a zero dim later
+    // divided by zero in `rem % dim`.
+    for (int d : dims)
+    {
+        if (d <= 0)
+            throw std::invalid_argument("unravel_index: dims must be positive");
+    }
     std::size_t total = 1;
     for (int d : dims)
         total *= static_cast<std::size_t>(d);
@@ -1432,6 +1447,11 @@ NP_API inline auto ravel_multi_index(const std::vector<ndarray<int>> &indices, c
             throw std::invalid_argument("ravel_multi_index: indices size mismatch");
     if (indices.size() != dims.size())
         throw std::invalid_argument("ravel_multi_index: dims size mismatch");
+    for (int d : dims)
+    {
+        if (d <= 0)
+            throw std::invalid_argument("ravel_multi_index: dims must be positive");
+    }
     ndarray<int> out(std::vector<int>{static_cast<int>(n)});
     for (std::size_t i = 0; i < n; ++i)
     {
@@ -1452,8 +1472,11 @@ NP_API inline auto ravel_multi_index(const std::vector<ndarray<int>> &indices, c
         }
         else // Fortran
         {
+            // NOTE (honesty audit): an earlier revision iterated d from high
+            // to low here, computing reversed C-order instead of Fortran
+            // order (dims=[3,4], idx=[1,2] gave 6, correct is 7).
             int stride = 1;
-            for (int d = static_cast<int>(dims.size()) - 1; d >= 0; --d)
+            for (std::size_t d = 0; d < dims.size(); ++d)
             {
                 int idx = indices[d].data()[indices[d]._flat_logical(i)];
                 if (idx < 0)

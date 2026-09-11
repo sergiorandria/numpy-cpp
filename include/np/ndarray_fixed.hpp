@@ -39,6 +39,9 @@
 #include "detail/scalar_custom.hpp"
 #include "exceptions.hpp"
 #include "ndarray.hpp"
+#if __has_include("bigint.hpp")
+#include "bigint.hpp"
+#endif
 
 namespace np::detail::fixed
 {

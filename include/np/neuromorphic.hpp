@@ -1,15 +1,25 @@
 /**
  * @file neuromorphic.hpp
- * @brief Event-driven neuromorphic backend — EventArray, spike encoding, LIF,
- * STDP, Loihi/SpiNNaker strategies for Loihi2/TrueNorth/Akida.
+ * @brief Software simulation of event-driven spiking dynamics — EventArray,
+ * spike encoding, LIF simulation, standalone STDP primitive.
  *
  * Provides `np::neuromorphic` / `np::event` / `np::spike` with:
  *   - `Event`/`EventArray` sparse COO (t,x,y,p) with shared_ptr + span
  *   - `SpikeEncoder` rate/temporal/TTFS encoding via ndarray ufuncs
- *   - `LIFNeuron` / `Izhikevich` stateful LIF (differential::Dual for surrogate)
- *   - `STDP` / `SurrogateGradient` learning
- *   - `INeuromorphicBackend` Strategy (LoihiBackend, SpiNNakerBackend, CPUBackend)
+ *   - `LIFNeuron` / `Izhikevich` stateful neuron models
+ *   - `STDP` weight-delta primitive (standalone; NOT wired into any
+ *     backend — no synaptic-weight model exists on the event path, so
+ *     there is nothing for it to update; see note on `STDP` below)
+ *   - `INeuromorphicBackend` Strategy (`CPUBackend` pass-through harness,
+ *     `LifSimBackend` real per-channel LIF simulation)
  *   - `NeuromorphicFactory` / `EventBuilder` / `SpikeVisitor` / `SpikeObserver`
+ *
+ * What this file is NOT: there is no Loihi2 / SpiNNaker2 / TrueNorth /
+ * NorthPole / Akida hardware access and no vendor SDK here — those are
+ * restricted-access research chips unreachable from a header-only library.
+ * An earlier revision named backends `LoihiBackend`/`SpiNNakerBackend`
+ * (returning `"Loihi2"`/`"SpiNNaker2"`) while all three `process()`
+ * implementations were byte-identical no-op clones; those names are gone.
  *
  * Design patterns: **Strategy** (backend), **Factory** (NeuromorphicFactory),
  * **Builder** (EventBuilder), **Visitor** (SpikeVisitor), **Observer**,
@@ -18,8 +28,9 @@
  * Modern C++20: `concepts` (SpikeScalar), `std::span`, `std::ranges`,
  * `std::variant`, `std::shared_mutex`, `constexpr`.
  *
- * Reference: Intel Loihi2, IBM TrueNorth/NorthPole, BrainChip Akida, SpiNNaker2;
- * Gerstner *Spiking Neuron Models*; `differential::Dual` for surrogate.
+ * Reference (algorithmic inspiration only, not hardware integration):
+ * Gerstner *Spiking Neuron Models* (LIF dynamics); `differential::Dual`
+ * for surrogate gradients.
  *
  * @author Sergio Randriamihoatra (sergiorandriamihoatra@gmail.com)
  */
@@ -221,6 +232,11 @@ struct IzhikevichNeuron
 };
 
 // ── STDP ─────────────────────────────────────────────────────────────────
+// NOTE (scope): standalone weight-delta primitive, independently correct and
+// tested — but NOT wired into any backend. There is no synaptic-weight model
+// on the event path (EventArray carries (t,x,y,p) only, no weights), so
+// process() has nothing to update with this. Wiring STDP in would require
+// designing that weight model first; explicitly out of scope.
 struct STDP
 {
     double a_plus = 0.01, a_minus = 0.012;
@@ -233,6 +249,56 @@ struct STDP
     }
 };
 
+namespace detail
+{
+// Shared event-driven LIF simulation used by every simulating backend, so
+// there is exactly one tested code path (not one loop per backend).
+//
+// Model: one LIFNeuron (copied from `proto`) per (x,y) channel, indexed
+// `x + y*width`. Input events are processed in nondecreasing time order
+// (stable sort, so equal-t events keep input order and output is
+// deterministic). Each input event advances its target neuron by exactly
+// one fixed-`dt` step of `LIFNeuron::step`, with injected current derived
+// from polarity: `p > 0` injects `+weight` (excitatory), `p <= 0` injects
+// `-weight` (inhibitory). A firing step emits `{t, x, y, p=+1}` at the
+// triggering input event's time. Events outside `[0,width)x[0,height)`
+// are ignored (documented; EventArrays built for other geometries must
+// not silently alias channels).
+//
+// Cost: O(events log events) for the sort + O(events) steps + O(channels)
+// neuron state. Deterministic given fixed (weight, dt, proto).
+NP_NODISCARD inline event::EventArray simulate_lif(const event::EventArray &in, double weight, double dt,
+                                                   LIFNeuron proto)
+{
+    event::EventArray out(in.width, in.height);
+    if (in.empty() || in.width <= 0 || in.height <= 0)
+    {
+        return out;
+    }
+    const auto sp = in.span();
+    std::vector<std::size_t> order(sp.size());
+    std::iota(order.begin(), order.end(), std::size_t{0});
+    std::stable_sort(order.begin(), order.end(), [&](std::size_t a, std::size_t b) { return sp[a].t < sp[b].t; });
+    std::vector<LIFNeuron> neurons(static_cast<std::size_t>(in.width) * static_cast<std::size_t>(in.height), proto);
+    const std::size_t stride = static_cast<std::size_t>(in.width);
+    for (std::size_t k : order)
+    {
+        const event::Event &e = sp[k];
+        if (e.x < 0 || e.y < 0 || e.x >= in.width || e.y >= in.height)
+        {
+            continue;
+        }
+        LIFNeuron &n = neurons[static_cast<std::size_t>(e.x) + static_cast<std::size_t>(e.y) * stride];
+        const double i_input = (e.p > 0) ? weight : -weight;
+        if (n.step(i_input, dt))
+        {
+            out.push({e.t, e.x, e.y, 1});
+        }
+    }
+    return out;
+}
+} // namespace detail
+
 // ── Backend Strategy ─────────────────────────────────────────────────────
 struct INeuromorphicBackend
 {
@@ -241,8 +307,15 @@ struct INeuromorphicBackend
     NP_NODISCARD virtual std::string name() const noexcept = 0;
 };
 
+// NOTE (honesty audit): an earlier revision had LoihiBackend/SpiNNakerBackend
+// here returning "Loihi2"/"SpiNNaker2" while all three process() bodies were
+// byte-identical no-op clones. Those classes are deleted; no backend in this
+// file claims hardware it never touches.
 struct CPUBackend : INeuromorphicBackend
 {
+    // Deliberate pass-through harness (no neuron simulation): useful for
+    // testing the event pipeline (encode -> route -> observe) without paying
+    // neuron-integration cost. Use LifSimBackend for real simulation.
     event::EventArray process(const event::EventArray &in) override
     {
         return in.clone();
@@ -253,28 +326,23 @@ struct CPUBackend : INeuromorphicBackend
     }
 };
 
-struct LoihiBackend : INeuromorphicBackend
+struct LifSimBackend : INeuromorphicBackend
 {
-    event::EventArray process(const event::EventArray &in) override
-    {
-        // Loihi2: event-driven, here we just pass through with shared_ptr alias
-        return in.clone();
-    }
-    NP_NODISCARD std::string name() const noexcept override
-    {
-        return "Loihi2";
-    }
-};
+    double weight = 2.0;
+    double dt = 1.0;
+    LIFNeuron proto;
 
-struct SpiNNakerBackend : INeuromorphicBackend
-{
+    LifSimBackend() = default;
+    LifSimBackend(double weight_, double dt_) : weight(weight_), dt(dt_)
+    {
+    }
     event::EventArray process(const event::EventArray &in) override
     {
-        return in.clone();
+        return detail::simulate_lif(in, weight, dt, proto);
     }
     NP_NODISCARD std::string name() const noexcept override
     {
-        return "SpiNNaker2";
+        return "LIF-sim";
     }
 };
 
@@ -285,13 +353,13 @@ struct NeuromorphicFactory
     {
         return std::make_shared<CPUBackend>();
     }
-    NP_NODISCARD static std::shared_ptr<INeuromorphicBackend> loihi()
+    NP_NODISCARD static std::shared_ptr<INeuromorphicBackend> lif_sim()
     {
-        return std::make_shared<LoihiBackend>();
+        return std::make_shared<LifSimBackend>();
     }
-    NP_NODISCARD static std::shared_ptr<INeuromorphicBackend> spinnaker()
+    NP_NODISCARD static std::shared_ptr<INeuromorphicBackend> lif_sim(double weight, double dt)
     {
-        return std::make_shared<SpiNNakerBackend>();
+        return std::make_shared<LifSimBackend>(weight, dt);
     }
 };
 

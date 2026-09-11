@@ -10,9 +10,9 @@ int main()
     auto a = np::eye<float>(4);
     auto b = np::eye<float>(4);
 
-    // HBM
-    auto ha = np::mem::migrate_to_hbm(a);
-    auto hb = np::mem::migrate_to_hbm(b);
+    // Placement-intent tags (host storage; see memory.hpp doc-block)
+    auto ha = np::mem::tag_hbm_hint(a);
+    auto hb = np::mem::tag_hbm_hint(b);
     auto hc = np::mem::migrate_to_host(ha); // demo round-trip
     std::cout << "HBM " << ha.size() << " " << hc.size() << "\n";
 

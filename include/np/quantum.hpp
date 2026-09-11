@@ -10,14 +10,15 @@
  *   - `IsolatedQuantumVM` (jthread + shared_mutex isolation, RAII, stop_token)
  *   - `QuantumFactory` (zero/plus/bell/ghz) + `CircuitFactory`
  *
- * Design: **Builder** (QuantumCircuit::Builder), **Strategy** (GateStrategy),
+ * Design: **Builder** (QuantumCircuit::Builder),
  * **Visitor** (GateVisitor), **Prototype** (StateVector::clone), **Decorator**
  * (NoisyStateVector), **Factory** (QuantumFactory).
  *
  * Modern C++20: `concepts` (QubitCount), `std::span`/`std::ranges`/`std::variant`,
  * `std::jthread`/`std::shared_mutex`/`std::optional`/`constexpr`.
  *
- * Reference: Nielsen-Chuang, IBM Qiskit, Cirq; `linalg::matmul` for state evolution.
+ * Reference: Nielsen-Chuang, IBM Qiskit, Cirq. State evolution is an
+ * in-house stride-k state-vector update (no LAPACK/cuBLAS dependency).
  *
  * @author Sergio Randriamihoatra (sergiorandriamihoatra@gmail.com)
  */
@@ -59,8 +60,12 @@ using c128 = std::complex<double>;
 #endif // __NP_C128_DTYPE_STD
 
 #define __NP_QUBIT_COUNT_MAX 20
+// NOTE: an earlier revision added `requires(T n) { n >= 1 && n <= ...; }`,
+// but a requires-expression only checks syntactic validity, so ANY integral
+// type satisfied it. The concept now constrains the type only; callers
+// validate the value at runtime (see IStateVector ctor).
 template <typename T>
-concept QubitCount = std::is_integral_v<T> && requires(T n) { n >= 1 && n <= __NP_QUBIT_COUNT_MAX; };
+concept QubitCount = std::is_integral_v<T>;
 
 namespace detail
 {
@@ -90,52 +95,40 @@ class IStateVector
 
     IStateVector() = default;
 
-    explicit IStateVector(int n_qubits) : amps(std::vector<int>{1 << n_qubits})
+    explicit IStateVector(int n_qubits) : amps(validated_shape(n_qubits))
     {
+        // NOTE (honesty audit): an earlier revision had _GuardBytes /
+        // is_corrupted / __st_assert_bytes_ok "tamper detection" here whose
+        // result was computed and discarded in every ctor (and whose
+        // predicate was inverted: true meant corrupt). It never fired by
+        // construction, so it is deleted rather than fixed.
+    }
+
+  private:
+    // Validates BEFORE the 1<<n shift runs (negative/huge n would otherwise
+    // be UB or a doomed allocation inside the mem-initializer).
+    NP_NODISCARD static std::vector<int> validated_shape(int n_qubits)
+    {
+        if (n_qubits < 1 || n_qubits > __NP_QUBIT_COUNT_MAX)
+        {
+            throw std::invalid_argument("StateVector: n_qubits must be in [1, 20]");
+        }
+        return std::vector<int>{1 << n_qubits};
     }
 };
-
-#ifndef __NP_MEMORY_GUARD_BYTES
-#define __NP_MEMORY_GUARD_BYTES
-
-struct _GuardBytes
-{
-    uint32_t bytes = 0xDEADBEEF;
-};
-
-// Check if there was a tamper before
-// move operation.
-template <typename T> auto is_corrupted(T &&value) -> bool
-{
-    return value.bytes != 0xDEADBEEF;
-}
-
-#endif // __NP_MEMORY_GUARD_BYTES
 
 // StateVector
 class StateVector : public IStateVector<c128>
 {
-  private:
-    _GuardBytes guard;
-
-    auto __st_assert_bytes_ok() -> bool
-    {
-        return guard.bytes != 0xDEADBEEF;
-    }
-
   public:
     StateVector() = default;
     explicit StateVector(int n_qubits) : IStateVector<c128>(n_qubits)
     {
-        __st_assert_bytes_ok();
-
         this->amps[0] = c128(1, 0);
     }
 
     explicit StateVector(ndarray<c128> &&a)
     {
-        __st_assert_bytes_ok();
-
         this->amps = std::move(std::forward<ndarray<c128>>(a));
     }
 
@@ -213,6 +206,7 @@ class StateVector : public IStateVector<c128>
 struct Gate1Q
 {
     ndarray<c128> mat; // 2x2
+    int q = 0;         // target qubit (bit index into the basis state)
     std::string name;
 };
 struct Gate2Q
@@ -236,6 +230,82 @@ struct GateVisitor
     virtual void visit(const Gate2Q &g) = 0;
     virtual void visit(const Gate3Q &g) = 0;
 };
+
+namespace detail
+{
+// Apply a dim x dim unitary (row-major, length dim*dim) to the listed
+// qubits of a 2^n state vector, in place.
+//
+// Qubit convention (documented choice): qubit k <-> bit k of the basis
+// index (little-endian), matching StateVector::measure()'s
+// `((i >> qubit) & 1)`. Multi-qubit matrix rows/cols are indexed
+// [b_{qk-1} ... b_{q1} b_{q0}], consistent with the Builder's CNOT/CZ/SWAP
+// tables. Throws invalid_argument on out-of-range/duplicate qubits or a
+// wrong-sized matrix. Cost O(2^n * dim^2); n is capped at 20 by
+// __NP_QUBIT_COUNT_MAX.
+inline void apply_kq(ndarray<c128> &amps, const std::vector<int> &qubits, const c128 *mat, std::size_t dim)
+{
+    const std::size_t n_amps = amps.size();
+    for (int q : qubits)
+    {
+        if (q < 0 || static_cast<std::size_t>(q) >= 8 * sizeof(std::size_t))
+        {
+            throw std::invalid_argument("apply: qubit index out of range");
+        }
+    }
+    for (std::size_t a = 0; a < qubits.size(); ++a)
+    {
+        for (std::size_t b = a + 1; b < qubits.size(); ++b)
+        {
+            if (qubits[a] == qubits[b])
+            {
+                throw std::invalid_argument("apply: duplicate qubit index in gate");
+            }
+        }
+    }
+    std::size_t qmask = 0;
+    for (int q : qubits)
+    {
+        qmask |= std::size_t{1} << static_cast<std::size_t>(q);
+    }
+    std::vector<c128> vin(dim), vout(dim);
+    std::vector<std::size_t> idx(dim);
+    auto &buf = amps.data();
+    for (std::size_t base = 0; base < n_amps; ++base)
+    {
+        if ((base & qmask) != 0)
+        {
+            continue;
+        }
+        for (std::size_t t = 0; t < dim; ++t)
+        {
+            std::size_t k = base;
+            for (std::size_t j = 0; j < qubits.size(); ++j)
+            {
+                if ((t >> j) & std::size_t{1})
+                {
+                    k |= std::size_t{1} << static_cast<std::size_t>(qubits[j]);
+                }
+            }
+            idx[t] = k;
+            vin[t] = static_cast<c128>(buf[k]);
+        }
+        for (std::size_t r = 0; r < dim; ++r)
+        {
+            c128 acc(0, 0);
+            for (std::size_t c = 0; c < dim; ++c)
+            {
+                acc += mat[r * dim + c] * vin[c];
+            }
+            vout[r] = acc;
+        }
+        for (std::size_t t = 0; t < dim; ++t)
+        {
+            buf[idx[t]] = vout[t];
+        }
+    }
+}
+} // namespace detail
 
 // Circuit Builder
 struct QuantumCircuit
@@ -302,9 +372,107 @@ struct QuantumCircuit
                 m(1, 1) = c128(-inv, 0);
                 return m;
             }();
+            g.q = q;
             g.name = "H";
             gates_.push_back(std::move(g));
-            (void)q;
+            return *this;
+        }
+        Builder &y(int q)
+        {
+            Gate1Q g;
+            g.mat = [] {
+                ndarray<c128> m(std::vector<int>{2, 2});
+                m(0, 0) = c128(0, 0);
+                m(0, 1) = c128(0, -1);
+                m(1, 0) = c128(0, 1);
+                m(1, 1) = c128(0, 0);
+                return m;
+            }();
+            g.q = q;
+            g.name = "Y";
+            gates_.push_back(std::move(g));
+            return *this;
+        }
+        Builder &z(int q)
+        {
+            Gate1Q g;
+            g.mat = [] {
+                ndarray<c128> m(std::vector<int>{2, 2});
+                m(0, 0) = c128(1, 0);
+                m(0, 1) = c128(0, 0);
+                m(1, 0) = c128(0, 0);
+                m(1, 1) = c128(-1, 0);
+                return m;
+            }();
+            g.q = q;
+            g.name = "Z";
+            gates_.push_back(std::move(g));
+            return *this;
+        }
+        Builder &s(int q)
+        {
+            Gate1Q g;
+            g.mat = [] {
+                ndarray<c128> m(std::vector<int>{2, 2});
+                m(0, 0) = c128(1, 0);
+                m(0, 1) = c128(0, 0);
+                m(1, 0) = c128(0, 0);
+                m(1, 1) = c128(0, 1);
+                return m;
+            }();
+            g.q = q;
+            g.name = "S";
+            gates_.push_back(std::move(g));
+            return *this;
+        }
+        Builder &t(int q)
+        {
+            Gate1Q g;
+            const double c = std::cos(3.141592653589793 / 4.0);
+            const double s = std::sin(3.141592653589793 / 4.0);
+            g.mat = [c, s] {
+                ndarray<c128> m(std::vector<int>{2, 2});
+                m(0, 0) = c128(1, 0);
+                m(0, 1) = c128(0, 0);
+                m(1, 0) = c128(0, 0);
+                m(1, 1) = c128(c, s);
+                return m;
+            }();
+            g.q = q;
+            g.name = "T";
+            gates_.push_back(std::move(g));
+            return *this;
+        }
+        Builder &ry(int q, double theta)
+        {
+            Gate1Q g;
+            g.mat = [theta] {
+                ndarray<c128> m(std::vector<int>{2, 2});
+                m(0, 0) = c128(std::cos(theta / 2), 0);
+                m(0, 1) = c128(-std::sin(theta / 2), 0);
+                m(1, 0) = c128(std::sin(theta / 2), 0);
+                m(1, 1) = c128(std::cos(theta / 2), 0);
+                return m;
+            }();
+            g.q = q;
+            g.name = "RY";
+            gates_.push_back(std::move(g));
+            return *this;
+        }
+        Builder &rz(int q, double theta)
+        {
+            Gate1Q g;
+            g.mat = [theta] {
+                ndarray<c128> m(std::vector<int>{2, 2});
+                m(0, 0) = c128(std::cos(theta / 2), -std::sin(theta / 2));
+                m(0, 1) = c128(0, 0);
+                m(1, 0) = c128(0, 0);
+                m(1, 1) = c128(std::cos(theta / 2), std::sin(theta / 2));
+                return m;
+            }();
+            g.q = q;
+            g.name = "RZ";
+            gates_.push_back(std::move(g));
             return *this;
         }
         Builder &x(int q)
@@ -319,8 +487,8 @@ struct QuantumCircuit
                 return m;
             }();
             g.name = "X";
+            g.q = q;
             gates_.push_back(std::move(g));
-            (void)q;
             return *this;
         }
         Builder &rx(int q, double theta)
@@ -335,11 +503,11 @@ struct QuantumCircuit
                 return m;
             }();
             g.name = "RX";
+            g.q = q;
             gates_.push_back(std::move(g));
-            (void)q;
             return *this;
         }
-        Builder &cnot(int c, int t)
+        Builder &cz(int c, int t)
         {
             Gate2Q g;
             g.mat = [] {
@@ -349,8 +517,75 @@ struct QuantumCircuit
                         m(i, j) = c128(0, 0);
                 m(0, 0) = c128(1, 0);
                 m(1, 1) = c128(1, 0);
-                m(2, 3) = c128(1, 0);
-                m(3, 2) = c128(1, 0);
+                m(2, 2) = c128(1, 0);
+                m(3, 3) = c128(-1, 0);
+                return m;
+            }();
+            g.q0 = c;
+            g.q1 = t;
+            g.name = "CZ";
+            gates_.push_back(std::move(g));
+            return *this;
+        }
+        Builder &swap(int a, int b)
+        {
+            Gate2Q g;
+            g.mat = [] {
+                ndarray<c128> m(std::vector<int>{4, 4});
+                for (int i = 0; i < 4; ++i)
+                    for (int j = 0; j < 4; ++j)
+                        m(i, j) = c128(0, 0);
+                m(0, 0) = c128(1, 0);
+                m(1, 2) = c128(1, 0);
+                m(2, 1) = c128(1, 0);
+                m(3, 3) = c128(1, 0);
+                return m;
+            }();
+            g.q0 = a;
+            g.q1 = b;
+            g.name = "SWAP";
+            gates_.push_back(std::move(g));
+            return *this;
+        }
+        Builder &toffoli(int c0, int c1, int t)
+        {
+            Gate3Q g;
+            // LSB-first like CNOT above: controls are bits q0,q1, so the
+            // flip pair is |011> (idx 3) <-> |111> (idx 7), not rows 6/7.
+            g.mat = [] {
+                ndarray<c128> m(std::vector<int>{8, 8});
+                for (int i = 0; i < 8; ++i)
+                    for (int j = 0; j < 8; ++j)
+                        m(i, j) = c128(i == j ? 1 : 0, 0);
+                m(3, 3) = c128(0, 0);
+                m(7, 7) = c128(0, 0);
+                m(3, 7) = c128(1, 0);
+                m(7, 3) = c128(1, 0);
+                return m;
+            }();
+            g.q0 = c0;
+            g.q1 = c1;
+            g.q2 = t;
+            g.name = "Toffoli";
+            gates_.push_back(std::move(g));
+            return *this;
+        }
+        Builder &cnot(int c, int t)
+        {
+            Gate2Q g;
+            // NOTE (honesty audit): this table previously swapped rows 2/3,
+            // which is CNOT only under MSB-first ordering — but measure()
+            // reads qubit k as bit k (LSB-first), so |01> never flipped.
+            // Fixed: control = bit q0, target = bit q1 (|01> <-> |11>).
+            g.mat = [] {
+                ndarray<c128> m(std::vector<int>{4, 4});
+                for (int i = 0; i < 4; ++i)
+                    for (int j = 0; j < 4; ++j)
+                        m(i, j) = c128(0, 0);
+                m(0, 0) = c128(1, 0);
+                m(1, 3) = c128(1, 0);
+                m(2, 2) = c128(1, 0);
+                m(3, 1) = c128(1, 0);
                 return m;
             }();
             g.q0 = c;
@@ -371,38 +606,65 @@ struct QuantumCircuit
         return Builder(n);
     }
 
-    // Apply to StateVector (isolated, uses linalg::matmul for 1q via span)
+    // Apply every gate in order to StateVector via detail::apply_kq
+    // (stride-k state-vector update; qubit k <-> bit k, see detail).
+    // NOTE (honesty audit): an earlier revision visited only gates.front(),
+    // applied only "H" to amps[0..1] regardless of qubit index, and no-op'd
+    // 2Q/3Q gates — bell_circuit() could never entangle. Every gate now
+    // applies with its stored matrix and qubit indices; malformed gates
+    // (wrong matrix shape, bad/duplicate qubits) throw invalid_argument.
     NP_API void apply(StateVector &sv) const
     {
         std::shared_lock lock(mtx_);
-        if (gates.empty())
-            return;
-        std::visit(
-            [&](auto &&g) {
-                using T = std::decay_t<decltype(g)>;
-                if constexpr (std::is_same_v<T, Gate1Q>)
+        const std::size_t s = sv.amps.size();
+        if (s == 0 || (s & (s - 1)) != 0 || s > (std::size_t{1} << __NP_QUBIT_COUNT_MAX))
+        {
+            throw std::invalid_argument("apply: state size must be a nonzero power of two within qubit cap");
+        }
+        int n = 0;
+        while ((std::size_t{1} << n) < s)
+        {
+            ++n;
+        }
+        const auto check_qubits = [&](const std::vector<int> &qs) {
+            for (int q : qs)
+            {
+                if (q < 0 || q >= n)
                 {
-                    if (g.name == "H" && sv.n_qubits() >= 1)
+                    throw std::invalid_argument("apply: qubit index out of range");
+                }
+            }
+        };
+        const auto mat_data = [&](const ndarray<c128> &m, int dim) -> const c128 * {
+            if (m.shape != std::vector<int>{dim, dim})
+            {
+                throw std::invalid_argument("apply: gate matrix has wrong shape");
+            }
+            return m.data().data();
+        };
+        for (const QuantumGate &gate : gates)
+        {
+            std::visit(
+                [&](auto &&g) {
+                    using T = std::decay_t<decltype(g)>;
+                    if constexpr (std::is_same_v<T, Gate1Q>)
                     {
-                        c128 a0 = static_cast<c128>(sv.amps[0]);
-                        c128 a1 = sv.amps.size() > 1 ? static_cast<c128>(sv.amps[1]) : c128(0, 0);
-                        double inv = 1.0 / std::sqrt(2);
-                        sv.amps[0] = c128((a0.real() + a1.real()) * inv, (a0.imag() + a1.imag()) * inv);
-                        if (sv.amps.size() > 1)
-                            sv.amps[1] = c128((a0.real() - a1.real()) * inv, (a0.imag() - a1.imag()) * inv);
+                        check_qubits({g.q});
+                        detail::apply_kq(sv.amps, {g.q}, mat_data(g.mat, 2), 2);
                     }
-                }
-                else if constexpr (std::is_same_v<T, Gate2Q>)
-                {
-                    // 2Q gate placeholder — no-op for now, keep production compile clean
-                    (void)g;
-                }
-                else if constexpr (std::is_same_v<T, Gate3Q>)
-                {
-                    (void)g;
-                }
-            },
-            gates.front());
+                    else if constexpr (std::is_same_v<T, Gate2Q>)
+                    {
+                        check_qubits({g.q0, g.q1});
+                        detail::apply_kq(sv.amps, {g.q0, g.q1}, mat_data(g.mat, 4), 4);
+                    }
+                    else if constexpr (std::is_same_v<T, Gate3Q>)
+                    {
+                        check_qubits({g.q0, g.q1, g.q2});
+                        detail::apply_kq(sv.amps, {g.q0, g.q1, g.q2}, mat_data(g.mat, 8), 8);
+                    }
+                },
+                gate);
+        }
     }
 };
 

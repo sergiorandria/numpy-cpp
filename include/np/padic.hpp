@@ -3,8 +3,12 @@
  * @brief p-adic numbers, p-adic lattices and p-adic differential forms — modern engine.
  *
  * Provides `np::padic` with:
- *   - `Padic<T>` p-adic number (prime p, precision prec, value as T/bigint): valuation,
- *     norm, unit, inverse, Hensel lift, Teichmüller, p-adic expansion via bigint.
+ *   - `Padic<T>` residues modulo p^prec (a finite-precision model of Z_p,
+ *     NOT full Q_p: negative valuations and non-unit denominators are
+ *     unrepresentable — from_rational() throws for non-units): valuation,
+ *     norm, unit, inverse, Hensel lift, Teichmüller, p-adic expansion.
+ *     T=bigint paths use exact big-int arithmetic; fixed-width T paths
+ *     throw when p^prec would overflow their range.
  *   - `PadicLattice<T>` p-adic lattice (basis over Z_p) with dual, volume, LLL over Z_p.
  *   - `PadicDifferential` p-adic forms (Kähler differentials over Q_p) with
  *     exterior derivative, wedge, and p-adic integration.
@@ -134,6 +138,8 @@ template <PadicScalar T> struct Padic
     {
         if (!is_prime(prime))
             throw std::invalid_argument("Padic: p must be prime");
+        if (pr < 0)
+            throw std::invalid_argument("Padic: prec must be non-negative");
         normalize();
     }
 
@@ -164,7 +170,8 @@ template <PadicScalar T> struct Padic
         return true;
     }
 
-    void normalize() noexcept
+    // NOTE (honesty audit): noexcept removed — bigint %= etc. allocate.
+    void normalize()
     {
         if constexpr (std::is_integral_v<T>)
         {
@@ -220,24 +227,47 @@ template <PadicScalar T> struct Padic
         return Padic(p, value, prec);
     }
 
-    // valuation v_p(value) = exponent of p in value (for integer value)
-    NP_NODISCARD int valuation() const noexcept
+    // valuation v_p(value) = exponent of p in value (for integer value).
+    // NOTE (honesty audit): an earlier revision funneled every T through
+    // static_cast<long long>, silently truncating bigint values above int64
+    // (via a convert_to path that zeroes on overflow). The bigint branch
+    // below uses exact T arithmetic; the narrowing cast is gone.
+    // (Also dropped bogus noexcept: T arithmetic can allocate/throw.)
+    NP_NODISCARD int valuation() const
     {
         if (value == T(0))
             return prec; // by convention, val(0)=prec (or infinity)
-        long long v = static_cast<long long>(value);
-        if (v < 0)
-            v = -v;
-        int cnt = 0;
-        while (v % p == 0 && cnt < prec)
+        if constexpr (std::is_same_v<T, np::bigint>)
         {
-            v /= p;
-            ++cnt;
+            T v = value;
+            if (v < T(0))
+                v = -v;
+            const T pp = T(p);
+            const T zero = T(0);
+            int cnt = 0;
+            while (v % pp == zero && cnt < prec)
+            {
+                v /= pp;
+                ++cnt;
+            }
+            return cnt;
         }
-        return cnt;
+        else
+        {
+            long long v = static_cast<long long>(value);
+            if (v < 0)
+                v = -v;
+            int cnt = 0;
+            while (v % p == 0 && cnt < prec)
+            {
+                v /= p;
+                ++cnt;
+            }
+            return cnt;
+        }
     }
 
-    NP_NODISCARD double norm() const noexcept
+    NP_NODISCARD double norm() const
     {
         // p-adic norm |x|_p = p^{-v_p(x)}
         int v = valuation();
@@ -246,7 +276,7 @@ template <PadicScalar T> struct Padic
         return std::pow(static_cast<double>(p), -v);
     }
 
-    NP_NODISCARD bool is_unit() const noexcept
+    NP_NODISCARD bool is_unit() const
     {
         return valuation() == 0 && value != T(0);
     }
@@ -259,49 +289,103 @@ template <PadicScalar T> struct Padic
     {
         if (!is_unit())
             throw std::runtime_error("Padic inverse: not a unit (not invertible mod p^prec)");
-        // Compute inverse modulo p^prec via extended Eucldiean (for integer)
-        long long a = static_cast<long long>(value);
-        long long mod = 1;
-        for (int i = 0; i < prec; ++i)
-            mod *= p;
-        long long t = 0, newt = 1;
-        long long r = mod, newr = a % mod;
-        if (newr < 0)
-            newr += mod;
-        while (newr != 0)
+        if constexpr (std::is_same_v<T, np::bigint>)
         {
-            long long q = r / newr;
-            long long tmp = t - q * newt;
-            t = newt;
-            newt = tmp;
-            tmp = r - q * newr;
-            r = newr;
-            newr = tmp;
+            // Exact extended Euclidean in T (no narrowing cast).
+            const T zero = T(0), one = T(1);
+            T mod = one;
+            for (int i = 0; i < prec; ++i)
+                mod *= p;
+            T t = zero, newt = one;
+            T r = mod, newr = value % mod;
+            if (newr < zero)
+                newr += mod;
+            while (newr != zero)
+            {
+                T q = r / newr;
+                T tmp = t - q * newt;
+                t = newt;
+                newt = tmp;
+                tmp = r - q * newr;
+                r = newr;
+                newr = tmp;
+            }
+            if (r > one)
+                throw std::runtime_error("Padic inverse: not coprime");
+            if (t < zero)
+                t += mod;
+            return Padic(p, t, prec);
         }
-        if (r > 1)
-            throw std::runtime_error("Padic inverse: not coprime");
-        if (t < 0)
-            t += mod;
-        return Padic(p, static_cast<T>(t), prec);
+        else
+        {
+            // Compute inverse modulo p^prec via extended Euclidean (for integer).
+            // p^prec must fit: otherwise mod wraps and the "inverse" is
+            // garbage (previously silent). Bound: prec*log2(p) < 63.
+            if (prec > 0 && static_cast<double>(prec) * std::log2(static_cast<double>(p)) >= 63.0)
+            {
+                throw std::invalid_argument("Padic inverse: p^prec overflows int64 (use Padic<bigint>)");
+            }
+            long long a = static_cast<long long>(value);
+            long long mod = 1;
+            for (int i = 0; i < prec; ++i)
+                mod *= p;
+            long long t = 0, newt = 1;
+            long long r = mod, newr = a % mod;
+            if (newr < 0)
+                newr += mod;
+            while (newr != 0)
+            {
+                long long q = r / newr;
+                long long tmp = t - q * newt;
+                t = newt;
+                newt = tmp;
+                tmp = r - q * newr;
+                r = newr;
+                newr = tmp;
+            }
+            if (r > 1)
+                throw std::runtime_error("Padic inverse: not coprime");
+            if (t < 0)
+                t += mod;
+            return Padic(p, static_cast<T>(t), prec);
+        }
     }
 
     // p-adic expansion digits (least significant first)
     NP_NODISCARD std::vector<int> expansion() const
     {
-        std::vector<int> dig(prec, 0);
-        long long v = static_cast<long long>(value);
-        if (v < 0)
+        std::vector<int> dig(static_cast<std::size_t>(prec), 0);
+        if constexpr (std::is_same_v<T, np::bigint>)
         {
-            // for negative, compute p-adic expansion via 2's complement style: mod p^prec
-            long long mod = 1;
+            // Exact: reduce mod p^prec in T, then peel base-p digits
+            // (the old long-long cast truncated big values here).
+            T mod = T(1);
             for (int i = 0; i < prec; ++i)
                 mod *= p;
-            v = ((v % mod) + mod) % mod;
+            T v = ((value % mod) + mod) % mod;
+            const T pp = T(p);
+            for (int i = 0; i < prec; ++i)
+            {
+                dig[static_cast<std::size_t>(i)] = static_cast<int>(v % pp);
+                v /= pp;
+            }
         }
-        for (int i = 0; i < prec; ++i)
+        else
         {
-            dig[i] = static_cast<int>(v % p);
-            v /= p;
+            long long v = static_cast<long long>(value);
+            if (v < 0)
+            {
+                // for negative, compute p-adic expansion via 2's complement style: mod p^prec
+                long long mod = 1;
+                for (int i = 0; i < prec; ++i)
+                    mod *= p;
+                v = ((v % mod) + mod) % mod;
+            }
+            for (int i = 0; i < prec; ++i)
+            {
+                dig[static_cast<std::size_t>(i)] = static_cast<int>(v % p);
+                v /= p;
+            }
         }
         return dig;
     }
@@ -325,26 +409,52 @@ template <PadicScalar T> struct Padic
     {
         if (value % p == 0)
             throw std::runtime_error("teichmuller: not a unit");
-        // Compute a^{p^{prec-1}} mod p^{prec} via fast pow
-        long long mod = 1;
-        for (int i = 0; i < prec; ++i)
-            mod *= p;
-        long long base = static_cast<long long>(value) % mod;
-        if (base < 0)
-            base += mod;
-        long long exp = 1;
-        for (int i = 0; i < prec - 1; ++i)
-            exp *= p;
-        long long res = 1, b = base;
-        long long e = exp;
-        while (e > 0)
+        if constexpr (std::is_same_v<T, np::bigint>)
         {
-            if (e & 1)
-                res = (res * b) % mod;
-            b = (b * b) % mod;
-            e >>= 1;
+            // Exact big-int path (the old long-long cast truncated here).
+            const T zero = T(0), one = T(1);
+            T mod = one;
+            for (int i = 0; i < prec; ++i)
+                mod *= p;
+            T base = value % mod;
+            if (base < zero)
+                base += mod;
+            T exp = one;
+            for (int i = 0; i < prec - 1; ++i)
+                exp *= p;
+            T res = one, b = base, e = exp;
+            while (e > zero)
+            {
+                if ((e % 2) != zero)
+                    res = (res * b) % mod;
+                b = (b * b) % mod;
+                e /= 2;
+            }
+            return Padic(p, res, prec);
         }
-        return Padic(p, static_cast<T>(res), prec);
+        else
+        {
+            // Compute a^{p^{prec-1}} mod p^{prec} via fast pow
+            long long mod = 1;
+            for (int i = 0; i < prec; ++i)
+                mod *= p;
+            long long base = static_cast<long long>(value) % mod;
+            if (base < 0)
+                base += mod;
+            long long exp = 1;
+            for (int i = 0; i < prec - 1; ++i)
+                exp *= p;
+            long long res = 1, b = base;
+            long long e = exp;
+            while (e > 0)
+            {
+                if (e & 1)
+                    res = (res * b) % mod;
+                b = (b * b) % mod;
+                e >>= 1;
+            }
+            return Padic(p, static_cast<T>(res), prec);
+        }
     }
 
     // Arithmetic (notify observers on operands and result for observer pattern)
@@ -460,16 +570,38 @@ template <PadicScalar T> struct PadicLattice
         return PadicLattice(underlying.dual(), p, prec);
     }
 
-    // p-adic volume: p^{-valuation(det Gram)}? For now use underlying volume
+    // Euclidean covolume sqrt|det Gram| (for the p-adic absolute value see
+    // p_adic_volume() below; an earlier revision returned this under that
+    // name with a "|det|_p" comment).
+    NP_NODISCARD double euclidean_volume() const
+    {
+        return static_cast<double>(underlying.volume());
+    }
+
+    // p-adic covolume |det Gram|_p = p^{-v_p(det)}. Exact for integral
+    // bases: det Gram is a nonnegative integer, factored by trial division.
+    // Throws invalid_argument when det is not (near-)integral or non
+    // positive — e.g. non-integral bases — instead of returning the
+    // Euclidean value under a p-adic name (the old behavior).
     NP_NODISCARD double p_adic_volume() const
     {
-        double vol = static_cast<double>(underlying.volume());
-        if (vol == 0)
-            return 0;
-        // p-adic volume is |det|_p = p^{-v_p(det)}
-        // Compute v_p of volume's integer representation via valuation
-        // Simplified: use log
-        return vol;
+        const double vol = static_cast<double>(underlying.volume());
+        if (vol == 0.0)
+            return 0.0;
+        if (!std::isfinite(vol))
+            throw std::invalid_argument("p_adic_volume: Euclidean volume not finite");
+        const double det = vol * vol;
+        const long long detll = std::llround(det);
+        if (std::abs(det - static_cast<double>(detll)) > 1e-6 * std::max(1.0, std::abs(det)) || detll <= 0)
+            throw std::invalid_argument("p_adic_volume: Gram determinant not a positive integer");
+        long long t = detll;
+        int v = 0;
+        while (t % p == 0)
+        {
+            t /= p;
+            ++v;
+        }
+        return std::pow(static_cast<double>(p), -v);
     }
 
     // Meet/join via underlying lattice
@@ -486,23 +618,26 @@ template <PadicScalar T> struct PadicLattice
         return PadicLattice(underlying.join(other.underlying), p, prec);
     }
 
-    // p-adic norm of lattice (minimal p-adic norm of basis vectors)
+    // p-adic lattice norm: min over basis vectors of max_j |b_ij|_p.
+    // NOTE (honesty audit): an earlier revision summed squares and took a
+    // square root (Euclidean norm) under this name. The non-Archimedean
+    // maximum is the correct p-adic analogue.
     NP_NODISCARD double p_adic_norm() const
     {
         int n = rank(), d = dim();
         double best = std::numeric_limits<double>::infinity();
         for (int i = 0; i < n; ++i)
         {
-            double nrm = 0;
+            double m = 0.0;
             for (int j = 0; j < d; ++j)
             {
                 Padic<T> c(p, underlying.basis(i, j), prec);
-                double cn = c.norm();
-                nrm += cn * cn;
+                const double cn = c.norm();
+                if (cn > m)
+                    m = cn;
             }
-            nrm = std::sqrt(nrm);
-            if (nrm < best)
-                best = nrm;
+            if (m < best)
+                best = m;
         }
         return best;
     }
@@ -515,6 +650,8 @@ struct PadicFactory
     {
         return Padic<T>(p, v, prec);
     }
+    // NOTE: quotients with negative valuation (non-unit denominator) are
+    // unrepresentable in this residues-mod-p^prec model — throws via inverse().
     template <PadicScalar T = int64_t> NP_NODISCARD static Padic<T> from_rational(int p, T num, T den, int prec = 20)
     {
         Padic<T> a(p, num, prec);
@@ -631,13 +768,15 @@ struct PadicDifferential
 {
     int p = 2;
     int prec = 20;
-    // For now, wrap a differential::VM that is interpreted p-adically
-    // (valuation-aware)
+    // NOTE (honesty audit): formal Kähler differentials obey the same
+    // algebraic rules over Q_p as over R, so delegating the FORMAL
+    // derivative is mathematically sound. What does NOT exist here is any
+    // p-adic norm/convergence test (an earlier comment claimed one) — series
+    // convergence in |·|_p is the caller's responsibility.
     PadicDifferential() = default;
     PadicDifferential(int pp, int pr) : p(pp), prec(pr)
     {
     }
-    // p-adic exterior derivative is same as real, but with p-adic norm for convergence
     template <typename VM> NP_NODISCARD auto exterior_derivative(const VM &vm) const
     {
         return ::np::differential::exterior_derivative(vm);

@@ -5,7 +5,7 @@
  *        np::detail::fixed::scalar_traits<T> backend.
  *
  * Two kinds of custom types are exercised:
- *  1. The _Np_dtype storage-classifier types (self-describing dtype
+ *  1. The dtype_storage storage-classifier types (self-describing dtype
  *     scalars defined in dtype.hpp, backed by scalar_custom.hpp).
  *  2. A user-defined scalar type specialized on scalar_traits in the test
  *     itself, demonstrating how any third-party scalar plugs into the same
@@ -19,7 +19,7 @@
 #include "test_util.hpp"
 
 // A user-defined scalar: routes through the scalar_traits customization
-// point exactly like the _Np_dtype classifiers.
+// point exactly like the dtype_storage classifiers.
 struct temperature
 {
     double value = 0.0;
@@ -58,8 +58,8 @@ template <> struct scalar_traits<::temperature>
 
 int main()
 {
-    using i64 = np::_Np_dtype::_Np_int64;
-    using f64 = np::_Np_dtype::_Np_float64;
+    using i64 = np::dtype_storage::int64;
+    using f64 = np::dtype_storage::float64;
 
     // Construction and access (rank-1 and rank-2).
     {
@@ -165,7 +165,7 @@ int main()
 
     // String-branch classifiers: get/make/truthy operate on the text core.
     {
-        np::ndarrayf<np::_Np_dtype::_Np_string, 2> s{std::string{"ab"}, std::string{"cd"}};
+        np::ndarrayf<np::dtype_storage::string, 2> s{std::string{"ab"}, std::string{"cd"}};
         test::check(s[0].value() == "ab", "string element");
         test::check(s.all(), "string all");
     }

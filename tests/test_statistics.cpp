@@ -134,6 +134,38 @@ int main()
     }
 
     // =====================================================================
+    // var / std / nanvar / nanstd ddof rules (match NumPy: NaN, never throw)
+    // =====================================================================
+    {
+        auto a = ndarray<double>::from_data(std::vector<int>{2}, {1.0, 2.0});
+        check(approx(var(a), 0.25), "var: population default");
+        check(approx(var(a, 1), 0.5), "var: ddof=1");
+        check(std::isnan(var(a, 2)), "var: ddof >= n -> NaN");
+        check(approx(var(a, -1), 0.5 / 3.0), "var: negative ddof allowed");
+        check(std::isnan(np::std(a, 2)), "std: ddof >= n -> NaN");
+        check(approx(nanvar(a, 1), 0.5), "nanvar: ddof=1");
+        check(std::isnan(nanvar(a, 2)), "nanvar: ddof >= n -> NaN");
+        check(std::isnan(nanstd(a, 5)), "nanstd: ddof > n -> NaN");
+
+        auto m = ndarray<double>::from_data(std::vector<int>{2, 2}, {1.0, 2.0, 3.0, 4.0});
+        auto va = var(m, 1, 1);
+        check(approx(va.at(0), 0.5) && approx(va.at(1), 0.5), "var axis: ddof=1");
+        auto va_big = var(m, 1, 2);
+        check(std::isnan(va_big.at(0)) && std::isnan(va_big.at(1)), "var axis: ddof >= slice -> NaN");
+
+        // cov with ddof swallowing the sample count -> NaN (NumPy agrees).
+        auto one = ndarray<double>::from_data(std::vector<int>{2}, {1.0, 2.0});
+        auto ck = cov(one, one, 2);
+        check(std::isnan(ck.at(0, 0)), "cov: ddof >= k -> NaN");
+
+        // corrcoef with a constant row -> NaN (zero variance, undefined).
+        auto xc = ndarray<double>::from_data(std::vector<int>{2, 3}, {1.0, 1.0, 1.0, 1.0, 2.0, 3.0});
+        auto ccx = corrcoef(xc);
+        check(std::isnan(ccx.at(0, 0)) && std::isnan(ccx.at(0, 1)), "corrcoef: constant row -> NaN");
+        check(approx(ccx.at(1, 1), 1.0), "corrcoef: varying row self -> 1");
+    }
+
+    // =====================================================================
     // histogram
     // =====================================================================
     {

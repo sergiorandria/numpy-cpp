@@ -35,20 +35,22 @@ int main()
                gpu->is_available() ? "yes" : "no");
         (void)cg;
 
-        auto ten = np::tensor::TensorFactory::hopper();
+        auto ten = np::tensor::TensorFactory::gpu_fp32();
         t0 = std::chrono::steady_clock::now();
         auto ct = ten->matmul(a, b);
         t1 = std::chrono::steady_clock::now();
-        printf("  Hopper FP8: %.2f ms\n", std::chrono::duration<double, std::milli>(t1 - t0).count());
+        printf("  GPU FP32: %.2f ms\n", std::chrono::duration<double, std::milli>(t1 - t0).count());
         (void)ct;
     }
 
     {
+        // Placement-intent tags over host storage (no device memory here;
+        // the old g.on_device member never existed — examples aren't built).
         auto arr = np::eye<float>(512);
-        auto h = np::mem::migrate_to_hbm(arr);
-        auto g = np::mem::migrate_to_device(arr);
-        auto p = np::mem::migrate_to_pinned(arr);
-        printf("mem: hbm %zu, device %zu (on_device %d), pinned %zu\n", h.size(), g.size(), g.on_device, p.size());
+        auto h = np::mem::tag_hbm_hint(arr);
+        auto g = np::mem::tag_device_hint(arr);
+        auto p = np::mem::tag_pinned_hint(arr);
+        printf("mem: hbm %zu, device %zu (host-resident), pinned %zu\n", h.size(), g.size(), p.size());
     }
     return 0;
 }

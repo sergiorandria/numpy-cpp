@@ -22,6 +22,65 @@ int main()
         test::check(diag[0] == bigint(2) && diag[1] == bigint(4), "SNF 2x2 values");
     }
     {
+        // SNF: torsion and divisibility on larger shapes (Kannan–Bachem path).
+        auto snf = [](std::vector<int> shape, std::vector<int> vals) {
+            return smith_normal_form(ndarray<int>::from_data(shape, vals));
+        };
+        auto d1 = snf({3, 3}, {2, 4, 4, -2, -3, 1, 4, 2, 4});
+        test::check(d1.size() == 3 && d1[0] == bigint(1) && d1[1] == bigint(2) && d1[2] == bigint(26),
+                    "SNF 3x3 torsion [1,2,26]");
+        auto d2 = snf({2, 3}, {3, 0, 0, 0, 5, 0});
+        test::check(d2.size() == 2 && d2[0] == bigint(1) && d2[1] == bigint(15), "SNF 2x3 [1,15]");
+        auto d3 = snf({4, 3}, {3, -1, 4, 0, 0, 3, 2, 4, 3, 2, -1, 4});
+        test::check(d3.size() == 3, "SNF 4x3 size");
+        bool div_ok = true;
+        bigint prev = 1;
+        for (auto &v : d3)
+        {
+            if (v == 0)
+            {
+                break;
+            }
+            if (v % prev != 0)
+            {
+                div_ok = false;
+            }
+            prev = v;
+        }
+        test::check(div_ok, "SNF divisibility chain");
+        // RP² has H₁ = Z/2: boundary ∂₂ = [2] gives torsion 2.
+        auto drp = snf({1, 1}, {2});
+        test::check(drp.size() == 1 && drp[0] == bigint(2), "SNF RP2 torsion [2]");
+        // Zero matrix stays zero.
+        auto dz = snf({2, 2}, {0, 0, 0, 0});
+        test::check(dz[0] == bigint(0) && dz[1] == bigint(0), "SNF zero matrix");
+        // Perf smoke: 14x14 dense-ish completes (minors would enumerate ~10^8).
+        std::vector<int> big(14 * 14);
+        unsigned long long st = 42;
+        for (auto &v : big)
+        {
+            st = st * 6364136223846793005ULL + 1442695040888963407ULL;
+            v = static_cast<int>((st >> 33) % 7) - 3;
+        }
+        auto db = snf({14, 14}, big);
+        test::check(db.size() == 14, "SNF 14x14 completes");
+        bool bdiv = true;
+        bigint bp = 1;
+        for (auto &v : db)
+        {
+            if (v == 0)
+            {
+                break;
+            }
+            if (v % bp != 0)
+            {
+                bdiv = false;
+            }
+            bp = v;
+        }
+        test::check(bdiv, "SNF 14x14 divisibility");
+    }
+    {
         // Betti: circle
         auto circ = circle_complex();
         auto betti = betti_numbers(circ);

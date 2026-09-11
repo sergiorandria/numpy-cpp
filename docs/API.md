@@ -43,19 +43,19 @@ Umbrella `include/np/np.hpp:13` (28 includes; all integrated). Every `np::` has 
 | **Differential** | `differential.hpp:438` | `VM, ScalarField, KForm, exterior_derivative, wedge, pullback, kernel::gradient/hessian/laplacian` | `Bott–Tu` |
 | **Lattice** | `lattice.hpp:143` | `Lattice, PosetLattice, meet/join, dual, lll/bkz, gram, volume, shortest/closest, LatticeFactory, Builder, Strategy, Visitor, Observer, Decorator` | `Micciancio–Goldwasser, Lenstra–Lenstra–Lovász` |
 | **Padic** | `padic.hpp:135` | `Padic, PadicLattice, Hensel/Newton, valuation/norm/expansion/teichmuller, PadicFactory, Builder, Strategy, Visitor, Observer, Decorator, to_padic_lattice` | `Gouvea, Koblitz, Serre` |
-| **Neuromorphic** | `neuromorphic.hpp:1` | `Event/EventArray, SpikeEncoder (rate/temporal), LIF/Izhikevich, STDP, INeuromorphicBackend (Loihi/SpiNNaker/CPU), NeuromorphicFactory, EventBuilder, SpikeVisitor, QuantizedEventArray` | `Loihi2/NorthPole/Akida, Gerstner` |
-| **Memory** | `memory.hpp:1` | `HBMArray/CXLArray, MemorySpace (Host/HBM/CXL/Unified), MemoryFactory, migrate_to_hbm/host, zeros_hbm` | `HBM3/CXL3.0/GH200` |
-| **Tensor** | `tensor_core.hpp:1` | `TensorBackend (CPU/Hopper/AMX), TensorFactory, QuantizedTensor, quantize, matmul_fp8` | `Hopper/Blackwell/AMX/SME2` |
-| **Analog** | `memristor.hpp:1` | `Crossbar (ReRAM, Mythic/d-Matrix), ReRAMFactory, dot (analog V=IR), quantize` | `ReRAM/Memristor` |
+| **Neuromorphic** | `neuromorphic.hpp:1` | `Event/EventArray, SpikeEncoder (rate/temporal), LIF/Izhikevich, STDP (standalone), INeuromorphicBackend (CPU/LIF-sim), NeuromorphicFactory, EventBuilder, SpikeVisitor, QuantizedEventArray` | `Gerstner (algorithmic only; no Loihi2/SpiNNaker hardware)` |
+| **Memory** | `memory.hpp:1` | `TaggedArray<T,S>` (ordinary host storage), `HbmHintArray/CxlHintArray/DeviceHintArray` placement hints, `tag_hbm_hint/tag_device_hint`, `migrate_to_host`, `zeros_hinted(shape, space)` | `HBM3/CXL3.0/GH200 (hints only; no device migration)` |
+| **Tensor** | `tensor_core.hpp:1` | `TensorBackend (CPU/GPU-FP32/CPU-blocked), TensorFactory, QuantizedTensor, quantize, matmul_fp8` | `cuBLAS FP32 / blocked CPU` |
+| **Analog** | `memristor.hpp:1` | `Crossbar (VMM, program, outer-product), MemristorCell (ion-drift/Simmons/TEAM/VTEAM/Yakopcic/Stanford), WindowFunction, MappingScheme, IMemristorBackend (Sim/Noisy/HW/Serial), DifferentialCrossbar, TiledCrossbar, CrossbarBuilder, ReRAMFactory (mythic/dmatrix presets)` | `Strukov/Kvatinsky/Yakopcic, Mythic/d-Matrix` |
 | **Photonics** | `photonics.hpp:1` | `MachZehnderMesh (unitary), PhotonicsFactory::identity, apply (optical matmul)` | `Lightmatter/Luminous` |
 | **Quantum** | `quantum.hpp:1` | `StateVector (2^n), QuantumFactory::zero/plus_state, prob` | `IBM Heron/Quantinuum` |
-| **Accelerator** | `accelerator.hpp:1` | `IAccelerator (CPU/GPU/Loihi/ReRAM), AcceleratorFactory::cpu/gpu/loihi/reram` | `Heterogeneous` |
+| **Accelerator** | `accelerator.hpp:1` | `IAccelerator (CPU/GPU/ReRAM-sim/auto_select), AcceleratorFactory::cpu/gpu/reram/auto_select/powerful` | `Heterogeneous (CPU/GPU/sim; no Loihi hardware)` |
 | **Cohomology** | `cohomology.hpp:191` | `cohomology_groups, cohomology_ring, cup_product, poincare_pairing, intersection_form, kunneth` | `Hatcher Ch.3` |
 | **Bundle** | `bundle.hpp:103` | `VectorBundle, tangent/cotangent, chern/stiefel/euler/pontryagin, whitney_sum, HodgeStar` | `Milnor–Stasheff` |
 | **Persistent** | `persistent.hpp:94` | `FilteredSimplex, Filtration, persistence_barcode, bottleneck_distance, vietoris_rips` | `Edelsbrunner–Harer` |
 | **Spectral** | `spectral.hpp:129` | `MayerVietoris, SpectralSequence, leray_serre (Hopf), ahss, total_betti` | `McCleary` |
 
-Count `712` base + ~50 higher-math (homology/bundle/persistent/spectral) + aliases.
+Count `712` base + ~50 higher-math (homology/bundle/persistent/spectral) + aliases. `other.hpp` parity shims (`who/disp/info/source/lookfor/deprecate/show_config`, `einsum_path_stub`) and default PQC KEM/signature wrappers are intentional documented stubs.
 
 ## Quick reference
 

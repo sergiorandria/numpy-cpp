@@ -310,7 +310,10 @@ NP_NODISCARD inline CharacteristicClasses whitney_sum_classes(const Characterist
                 S.stiefel[i + j] ^= (A.stiefel[i] & B.stiefel[j]);
     while (S.stiefel.size() > 1 && S.stiefel.back() == 0)
         S.stiefel.pop_back();
-    S.euler = A.euler * B.euler; // not correct in general, placeholder
+    // e(E+ F) = e(E) cup e(F) is exact as cohomology classes (Milnor-Stasheff, §9); as stored Euler
+    // numbers the product is exact for oriented even-rank summands. Odd-rank summands store
+    // convention-0, which can mask a nonzero even-rank sum — treat such results as approximate.
+    S.euler = A.euler * B.euler;
     S.inconclusive = A.inconclusive || B.inconclusive;
     return S;
 }

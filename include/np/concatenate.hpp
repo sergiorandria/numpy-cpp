@@ -151,6 +151,12 @@ template <typename T> NP_NODISCARD auto concatenate(const std::vector<ndarray<T>
     for (const auto &arr : arrays)
     {
         const std::size_t axis_size = static_cast<std::size_t>(arr.shape[axis]);
+        if (arr.size() == 0)
+        {
+            // Empty input contributes no elements; without this guard the
+            // do-while below runs once and get() throws out_of_range.
+            continue;
+        }
 
         // Copy all elements from this array
         std::vector<std::size_t> src_idx(ndim, 0);
@@ -232,6 +238,12 @@ template <typename T> NP_API NP_NODISCARD auto stack(const std::vector<ndarray<T
 
     // Allocate output
     ndarray<T> result(out_shape, first.type);
+    if (first.size() == 0)
+    {
+        // All inputs share first.shape (validated above), so all are empty:
+        // the do-while below would run once and throw out_of_range.
+        return result;
+    }
 
     // Copy data
     for (std::size_t i = 0; i < arrays.size(); ++i)

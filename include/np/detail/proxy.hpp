@@ -261,13 +261,30 @@ template <typename T, bool IsConst, std::size_t MaxDims = 8> class ProxyBase
 
     /**
      * @brief Descend one dimension, appending the new index.
+     *
+     * Negative indices count from the end of the current dimension
+     * (NumPy semantics), matching `ndarray::operator[]`.
      * @throws std::out_of_range if this would exceed `MaxDims` chained
-     *         subscripts (see `IndexStack::push_back`).
+     *         subscripts (see `IndexStack::push_back`), or if the
+     *         normalized index is out of bounds.
      */
-    NP_NODISCARD constexpr auto operator[](std::size_t idx) const -> Self
+    NP_NODISCARD constexpr auto operator[](std::ptrdiff_t idx) const -> Self
     {
         Stack next = m_indices; // trivial copy -- no heap touch
-        next.push_back(idx);
+        const std::size_t depth = m_indices.size();
+        if (depth < m_array.shape.size())
+        {
+            const std::ptrdiff_t dim = static_cast<std::ptrdiff_t>(m_array.shape[depth]);
+            if (idx < 0)
+            {
+                idx += dim;
+            }
+            if (idx < 0 || idx >= dim)
+            {
+                throw std::out_of_range("proxy subscript out of bounds");
+            }
+        }
+        next.push_back(static_cast<std::size_t>(idx));
         return Self(m_array, next);
     }
 };

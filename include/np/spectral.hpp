@@ -89,9 +89,17 @@ NP_NODISCARD inline MayerVietoris mayer_vietoris(const homology::SimplicialCompl
     mv.betti_B = homology::betti_numbers(B);
     mv.betti_intersection = homology::betti_numbers(intersection);
     mv.betti_union = homology::betti_numbers(Union);
-    // Mayer–Vietoris is exact for any open cover; Euler check is sanity
-    // but may fail for arbitrary test inputs not forming a cover – keep exact true.
-    mv.exact = true;
+    // NOTE (honesty audit): an earlier revision hardcoded exact=true with a
+    // comment admitting the check "may fail for arbitrary test inputs".
+    // Exactness is now computed: for a genuine open cover the Euler
+    // characteristics satisfy chi(U) = chi(A) + chi(B) - chi(A cap B).
+    const auto euler = [](const std::vector<int> &b) {
+        long long chi = 0;
+        for (std::size_t i = 0; i < b.size(); ++i)
+            chi += (i % 2 == 0 ? 1 : -1) * static_cast<long long>(b[i]);
+        return chi;
+    };
+    mv.exact = (euler(mv.betti_union) == euler(mv.betti_A) + euler(mv.betti_B) - euler(mv.betti_intersection));
     return mv;
 }
 
@@ -125,7 +133,7 @@ NP_NODISCARD inline SpectralSequencePage e2_page_product(const homology::Simplic
  */
 NP_NODISCARD inline SpectralSequence leray_serre(const homology::SimplicialComplex &base,
                                                  const homology::SimplicialComplex &fiber,
-                                                 const std::string &name = "F→E→B")
+                                                 const std::string &name = "F→E→B", bool is_product = false)
 {
     SpectralSequence ss;
     ss.bundle_name = name;
@@ -162,14 +170,23 @@ NP_NODISCARD inline SpectralSequence leray_serre(const homology::SimplicialCompl
         return ss;
     }
 
-    // Generic product: collapse at E2
-    // Check if base or fiber is contractible → also collapse
-    // Otherwise mark inconclusive higher differentials
-    bool is_product_like = true;
-    // For now assume product collapses
-    ss.collapses = is_product_like;
-    ss.collapse_page = 2;
-    ss.inconclusive = false;
+    // Generic fibration: higher differentials are NOT computed here, so the
+    // sequence must stay inconclusive. (An earlier revision declared
+    // collapse at E2 with inconclusive=false for every input, letting
+    // downstream total_betti_from_einfinity() sum a page advertised as
+    // final. Only the Hopf path above, which actually evaluates d2, may
+    // claim collapse — and a caller-certified product via is_product.)
+    if (is_product)
+    {
+        // E = B x F genuinely: Künneth gives E2 = H(B)⊗H(F) with all d_r = 0.
+        ss.collapses = true;
+        ss.collapse_page = 2;
+        ss.inconclusive = false;
+        return ss;
+    }
+    ss.collapses = false;
+    ss.collapse_page = -1; // struct's own "none" sentinel (see default member)
+    ss.inconclusive = true;
     return ss;
 }
 

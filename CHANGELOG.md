@@ -2,6 +2,13 @@
 
 All notable changes to `numpy-cpp` will be documented here. Format based on [Keep a Changelog](https://keepachangelog.com/en/1.0.0/), versioning follows [SemVer](https://semver.org/spec/v2.0.0.html).
 
+## [Unreleased] — honesty pass + 49/49 suites
+
+### Fixed
+- **Docs honesty** — `README.md` no longer claims `0 stubs` or bare `Loihi2/SpiNNaker`, `HBM/CXL`, `Hopper/AMX` backends: `neuromorphic` is CPU LIF simulation, `memory` is host storage with `HbmHintArray`/`CxlHintArray` placement hints (`memory.hpp:104-176`), `tensor` is blocked-CPU/FP32-GPU dispatch with quantize-around-FP32 (`tensor_core.hpp:22`), `accelerator` is CPU/GPU/ReRAM-sim (`accelerator.hpp:226-242`). Documented `other.hpp` parity shims and default PQC wrappers as intentional stubs; test count corrected to `49/49` across `README.md`, `docs/` and CI step name.
+- **CI enforcement** — `lint` job is now blocking (`clang-tidy` warnings fail the build), new `clang-format --check` job enforces `.clang-format` (`ColumnLimit: 120`, 4-space), TSan keeps `NP_WERROR=ON` (warnings-as-errors stay on where races hide).
+- **Error handling (AGENTS.md §4)** — narrowed `datetime64_from_string` catch to `const std::exception&` with rethrow as `invalid_argument`; documented the `datetime_data` count fallback and the `cuda.hpp` `noexcept` cache fallback so no `catch (...)` silently swallows.
+
 ## [1.0.0] — 2025-09-03 — Production Ready
 
 First stable **1.0** — header-only C++20 NumPy 2.2 — 712 routines, zero Python runtime.

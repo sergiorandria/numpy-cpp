@@ -9,15 +9,73 @@
  */
 #ifndef NP_DTYPE_HPP
 #define NP_DTYPE_HPP
+#pragma once
 
 #include <complex>
+#include <concepts>
+#include <cstddef>
 #include <cstdint>
+#include <initializer_list>
+#include <limits>
+#include <stdexcept>
 #include <string>
 #include <string_view>
 #include <type_traits>
 #include <vector>
 
 #include "api_macros.hpp"
+
+namespace np::detail
+{
+// Dtype tuning constants (constexpr, no magic numbers in logic).
+inline constexpr int kBitsPerByte = 8;
+inline constexpr std::size_t kBytes1 = 1;
+inline constexpr std::size_t kBytes2 = 2;
+inline constexpr std::size_t kBytes4 = 4;
+inline constexpr std::size_t kBytes8 = 8;
+inline constexpr std::size_t kBytes16 = 16;
+inline constexpr int kBits8 = 8;
+inline constexpr int kBits16 = 16;
+inline constexpr int kBits32 = 32;
+inline constexpr int kBits64 = 64;
+inline constexpr std::size_t kSizeof64Bit = 8;
+inline constexpr long long kInt8Max = 127;
+inline constexpr long long kInt16Max = 32767;
+inline constexpr long long kInt32Max = 2147483647;
+inline constexpr long long kInt8Min = -128;
+inline constexpr long long kInt16Min = -32768;
+inline constexpr long long kInt32Min = -2147483648LL;
+inline constexpr double kFloat16Eps = 0.0009765625;
+inline constexpr int kRankBool = 0;
+inline constexpr int kRankInt8 = 1;
+inline constexpr int kRankInt16 = 2;
+inline constexpr int kRankInt32 = 3;
+inline constexpr int kRankInt64 = 4;
+inline constexpr int kRankUint8 = 5;
+inline constexpr int kRankUint16 = 6;
+inline constexpr int kRankUint32 = 7;
+inline constexpr int kRankUint64 = 8;
+inline constexpr int kRankBigint = 9;
+inline constexpr int kRankFloat16 = 10;
+inline constexpr int kRankFloat32 = 11;
+inline constexpr int kRankFloat64 = 12;
+inline constexpr int kRankLongdouble = 13;
+inline constexpr int kRankComplex64 = 14;
+inline constexpr int kRankComplex128 = 15;
+inline constexpr int kRankClongdouble = 16;
+inline constexpr int kRankDatetime = 17;
+inline constexpr int kRankString = 18;
+inline constexpr int kRankUnicode = 19;
+inline constexpr int kRankVoid = 20;
+inline constexpr int kRankObject = 21;
+inline constexpr int kKindBool = 0;
+inline constexpr int kKindInt = 1;
+inline constexpr int kKindUint = 2;
+inline constexpr int kKindFloat = 3;
+inline constexpr int kKindComplex = 4;
+inline constexpr int kKindDatetime = 5;
+inline constexpr int kKindOther = 6;
+} // namespace np::detail
 
 namespace np
 {
@@ -75,79 +133,79 @@ namespace detail
 /**
  * @brief Maps a np::dtype value to its native C++ type.
  *
- * @tparam _DtypeElement  A np::dtype enumeration value.
+ * @tparam D  A np::dtype enumeration value.
  */
-template <dtype _DtypeElement> struct _Np_type_to_cxx;
+template <dtype D> struct dtype_to_cxx;
 
-template <> struct _Np_type_to_cxx<dtype::int8>
+template <> struct dtype_to_cxx<dtype::int8>
 {
     using type = std::int8_t;
 };
-template <> struct _Np_type_to_cxx<dtype::int16>
+template <> struct dtype_to_cxx<dtype::int16>
 {
     using type = std::int16_t;
 };
-template <> struct _Np_type_to_cxx<dtype::int32>
+template <> struct dtype_to_cxx<dtype::int32>
 {
     using type = std::int32_t;
 };
-template <> struct _Np_type_to_cxx<dtype::int64>
+template <> struct dtype_to_cxx<dtype::int64>
 {
     using type = std::int64_t;
 };
-template <> struct _Np_type_to_cxx<dtype::uint8>
+template <> struct dtype_to_cxx<dtype::uint8>
 {
     using type = std::uint8_t;
 };
-template <> struct _Np_type_to_cxx<dtype::uint16>
+template <> struct dtype_to_cxx<dtype::uint16>
 {
     using type = std::uint16_t;
 };
-template <> struct _Np_type_to_cxx<dtype::uint32>
+template <> struct dtype_to_cxx<dtype::uint32>
 {
     using type = std::uint32_t;
 };
-template <> struct _Np_type_to_cxx<dtype::uint64>
+template <> struct dtype_to_cxx<dtype::uint64>
 {
     using type = std::uint64_t;
 };
-template <> struct _Np_type_to_cxx<dtype::float16>
+template <> struct dtype_to_cxx<dtype::float16>
 {
     using type = std::uint16_t;
 };
-template <> struct _Np_type_to_cxx<dtype::float32>
+template <> struct dtype_to_cxx<dtype::float32>
 {
     using type = float;
 };
-template <> struct _Np_type_to_cxx<dtype::float64>
+template <> struct dtype_to_cxx<dtype::float64>
 {
     using type = double;
 };
-template <> struct _Np_type_to_cxx<dtype::longdouble>
+template <> struct dtype_to_cxx<dtype::longdouble>
 {
     using type = long double;
 };
-template <> struct _Np_type_to_cxx<dtype::complex64>
+template <> struct dtype_to_cxx<dtype::complex64>
 {
     using type = std::complex<float>;
 };
-template <> struct _Np_type_to_cxx<dtype::complex128>
+template <> struct dtype_to_cxx<dtype::complex128>
 {
     using type = std::complex<double>;
 };
-template <> struct _Np_type_to_cxx<dtype::clongdouble>
+template <> struct dtype_to_cxx<dtype::clongdouble>
 {
     using type = std::complex<long double>;
 };
-template <> struct _Np_type_to_cxx<dtype::bool_>
+template <> struct dtype_to_cxx<dtype::bool_>
 {
     using type = bool;
 };
-template <> struct _Np_type_to_cxx<dtype::datetime64>
+template <> struct dtype_to_cxx<dtype::datetime64>
 {
     using type = std::int64_t;
 };
-template <> struct _Np_type_to_cxx<dtype::timedelta64>
+template <> struct dtype_to_cxx<dtype::timedelta64>
 {
     using type = std::int64_t;
 };
@@ -182,9 +240,9 @@ template <typename T> struct cxx_to_np_type_impl
         : std::is_same_v<T, signed char>               ? dtype::int8
         : std::is_same_v<T, unsigned char>             ? dtype::uint8
         : std::is_same_v<T, wchar_t>                   ? dtype::int32
-        : std::is_same_v<T, std::size_t>               ? (sizeof(std::size_t) == 8 ? dtype::uint64 : dtype::uint32)
-        : std::is_same_v<T, std::ptrdiff_t>            ? (sizeof(std::ptrdiff_t) == 8 ? dtype::int64 : dtype::int32)
-                                                       : dtype::void_;
+        : std::is_same_v<T, std::size_t>    ? (sizeof(std::size_t) == kSizeof64Bit ? dtype::uint64 : dtype::uint32)
+        : std::is_same_v<T, std::ptrdiff_t> ? (sizeof(std::ptrdiff_t) == kSizeof64Bit ? dtype::int64 : dtype::int32)
+                                            : dtype::void_;
 };
 
 template <typename T> struct cxx_to_np_type : cxx_to_np_type_impl<std::remove_cv_t<T>>
@@ -205,23 +263,23 @@ template <typename T> struct is_complex<std::complex<T>> : std::true_type
 template <typename T> inline constexpr bool is_complex_v = is_complex<T>::value;
 } // namespace detail
 
-namespace _Np_dtype
+namespace dtype_storage
 {
 /** @brief Trivial branch used when the other dtype branch is unused. */
-struct _Np_unused_branch
+struct unused_branch
 {
 };
 
 /**
  * @brief Storage type for the character dtypes.
  *
- * @tparam _DtypeElement  A np::dtype value (`string_` or `unicode_`).
+ * @tparam D  A np::dtype value (`string_` or `unicode_`).
  */
-template <dtype _DtypeElement> struct _Np_string_value
+template <dtype D> struct string_value
 {
     using type = std::string;
 };
-template <> struct _Np_string_value<dtype::unicode_>
+template <> struct string_value<dtype::unicode_>
 {
     using type = std::u32string;
 };
@@ -239,44 +297,44 @@ template <dtype D> inline constexpr bool is_string_dtype_v = D == dtype::string_
  * so the numeric case keeps a literal type usable in constant
  * expressions.
  *
- * @tparam _DtypeElement  A np::dtype enumeration value.
- * @tparam _IsString      True when the dtype stores text.
+ * @tparam D  A np::dtype enumeration value.
+ * @tparam IsString      True when the dtype stores text.
  */
-template <auto _DtypeElement, bool _IsString = is_string_dtype_v<_DtypeElement>> struct _Np_StorageClassifier;
+template <auto D, bool IsString = is_string_dtype_v<D>> struct storage_classifier;
 
 /**
  * @brief Integral/numeric branch of the storage classifier.
  *
- * @tparam _DtypeElement  A np::dtype enumeration value.
+ * @tparam D  A np::dtype enumeration value.
  */
-template <auto _DtypeElement> struct _Np_StorageClassifier<_DtypeElement, /* _IsString */ false>
+template <auto D> struct storage_classifier<D, /* IsString */ false>
 {
-    using value_type = typename detail::_Np_type_to_cxx<_DtypeElement>::type;
+    using value_type = typename detail::dtype_to_cxx<D>::type;
 
-    static constexpr np::dtype type = _DtypeElement;
+    static constexpr np::dtype type = D;
     static constexpr bool is_text = false;
 
   private:
-    union _Np_storage {
-        value_type value;         // numeric branch
-        _Np_unused_branch unused; // string branch placeholder
+    union storage_union {
+        value_type value;     // numeric branch
+        unused_branch unused; // string branch placeholder
     } storage_{};
 
   public:
-    constexpr _Np_StorageClassifier() noexcept = default;
-    constexpr _Np_StorageClassifier(const value_type &__v) : storage_{.value = __v}
+    constexpr storage_classifier() noexcept = default;
+    constexpr storage_classifier(const value_type &v) : storage_{.value = v}
     {
     }
-    constexpr _Np_StorageClassifier(value_type &&__v) noexcept : storage_{.value = static_cast<value_type &&>(__v)}
+    constexpr storage_classifier(value_type &&v) noexcept : storage_{.value = static_cast<value_type &&>(v)}
     {
     }
 
-    constexpr auto operator=(const value_type &other) -> _Np_StorageClassifier &
+    constexpr auto operator=(const value_type &other) -> storage_classifier &
     {
         storage_.value = other;
         return *this;
     }
-    constexpr auto operator=(value_type &&other) -> _Np_StorageClassifier &
+    constexpr auto operator=(value_type &&other) -> storage_classifier &
     {
         storage_.value = static_cast<value_type &&>(other);
         return *this;
@@ -310,70 +368,69 @@ template <auto _DtypeElement> struct _Np_StorageClassifier<_DtypeElement, /* _Is
 /**
  * @brief String branch of the storage classifier.
  *
- * @tparam _DtypeElement  A np::dtype enumeration value.
+ * @tparam D  A np::dtype enumeration value.
  */
-template <auto _DtypeElement> struct _Np_StorageClassifier<_DtypeElement, true>
+template <auto D> struct storage_classifier<D, true>
 {
-    using value_type = typename _Np_string_value<_DtypeElement>::type;
+    using value_type = typename string_value<D>::type;
 
-    static constexpr np::dtype type = _DtypeElement;
+    static constexpr np::dtype type = D;
     static constexpr bool is_text = true;
 
   private:
-    union _Np_storage {
-        _Np_unused_branch unused; // numeric branch placeholder
-        value_type value;         // string branch
+    union storage_union {
+        unused_branch unused; // numeric branch placeholder
+        value_type value;     // string branch
 
-        constexpr _Np_storage() noexcept : value{}
+        constexpr storage_union() noexcept : value{}
         {
         }
-        _Np_storage(const value_type &__v) noexcept : value(__v)
+        storage_union(const value_type &v) noexcept : value(v)
         {
         }
-        _Np_storage(value_type &&__v) noexcept : value(static_cast<value_type &&>(__v))
+        storage_union(value_type &&v) noexcept : value(static_cast<value_type &&>(v))
         {
         }
 
-        ~_Np_storage()
+        ~storage_union()
         {
             value.~value_type();
         }
     };
 
-    _Np_storage storage_{};
+    storage_union storage_{};
 
   public:
-    _Np_StorageClassifier() noexcept = default;
-    _Np_StorageClassifier(const value_type &__v) noexcept : storage_(__v)
+    storage_classifier() noexcept = default;
+    storage_classifier(const value_type &v) noexcept : storage_(v)
     {
     }
-    _Np_StorageClassifier(value_type &&__v) noexcept : storage_(static_cast<value_type &&>(__v))
+    storage_classifier(value_type &&v) noexcept : storage_(static_cast<value_type &&>(v))
     {
     }
-    _Np_StorageClassifier(const _Np_StorageClassifier &other) noexcept : storage_(other.storage_.value)
+    storage_classifier(const storage_classifier &other) noexcept : storage_(other.storage_.value)
     {
     }
-    _Np_StorageClassifier(_Np_StorageClassifier &&other) noexcept
-        : storage_(static_cast<value_type &&>(other.storage_.value))
+    storage_classifier(storage_classifier &&other) noexcept : storage_(static_cast<value_type &&>(other.storage_.value))
     {
     }
 
-    auto operator=(const value_type &other) -> _Np_StorageClassifier &
+    auto operator=(const value_type &other) -> storage_classifier &
     {
         storage_.value = other;
         return *this;
     }
-    auto operator=(value_type &&other) -> _Np_StorageClassifier &
+    auto operator=(value_type &&other) -> storage_classifier &
     {
         storage_.value = static_cast<value_type &&>(other);
         return *this;
     }
-    auto operator=(const _Np_StorageClassifier &other) -> _Np_StorageClassifier &
+    auto operator=(const storage_classifier &other) -> storage_classifier &
     {
         storage_.value = other.storage_.value;
         return *this;
     }
-    auto operator=(_Np_StorageClassifier &&other) -> _Np_StorageClassifier &
+    auto operator=(storage_classifier &&other) -> storage_classifier &
     {
         storage_.value = static_cast<value_type &&>(other.storage_.value);
         return *this;
@@ -405,86 +462,86 @@ template <auto _DtypeElement> struct _Np_StorageClassifier<_DtypeElement, true>
 };
 
 /** @brief Compile-time compare of two storage classifiers. */
-template <auto _L, bool _Lb, auto _R, bool _Rb>
-constexpr auto operator==(_Np_StorageClassifier<_L, _Lb>, _Np_StorageClassifier<_R, _Rb>) noexcept -> bool
+template <auto L, bool Lb, auto R, bool Rb>
+constexpr auto operator==(storage_classifier<L, Lb>, storage_classifier<R, Rb>) noexcept -> bool
 {
-    return _L == _R;
+    return L == R;
 }
-template <auto _L, bool _Lb, auto _R, bool _Rb>
-constexpr auto operator!=(_Np_StorageClassifier<_L, _Lb>, _Np_StorageClassifier<_R, _Rb>) noexcept -> bool
+template <auto L, bool Lb, auto R, bool Rb>
+constexpr auto operator!=(storage_classifier<L, Lb>, storage_classifier<R, Rb>) noexcept -> bool
 {
-    return _L != _R;
+    return L != R;
 }
-#ifdef _NP_USE_DIRECT_STD_TYPES
+#ifdef NP_USE_DIRECT_STD_TYPES
 /**
  * @brief Storage type aliases mirroring the numpy C-API `npy_*`
  *        typedefs. Each alias names the native C++ storage of the
  *        matching np::dtype (the `value_type` of
- *        detail::_Np_type_to_cxx), so it can be used as a
+ *        detail::dtype_to_cxx), so it can be used as a
  *        compile-time dtype tag. `string_` / `unicode_` use a string
  *        attribute; only `void_` and `object_` have no fixed
  *        C++ storage and are omitted.
  */
-using _Np_int8 = std::int8_t;
-using _Np_int16 = std::int16_t;
-using _Np_int32 = std::int32_t;
-using _Np_int64 = std::int64_t;
-using _Np_uint8 = std::uint8_t;
-using _Np_uint16 = std::uint16_t;
-using _Np_uint32 = std::uint32_t;
-using _Np_uint64 = std::uint64_t;
-using _Np_float16 = std::uint16_t; // half-precision bit storage
-using _Np_float32 = float;
-using _Np_float64 = double;
-using _Np_longdouble = long double;
-using _Np_complex64 = std::complex<float>;
-using _Np_complex128 = std::complex<double>;
-using _Np_clongdouble = std::complex<long double>;
-using _Np_bool_ = bool;
+using int8 = std::int8_t;
+using int16 = std::int16_t;
+using int32 = std::int32_t;
+using int64 = std::int64_t;
+using uint8 = std::uint8_t;
+using uint16 = std::uint16_t;
+using uint32 = std::uint32_t;
+using uint64 = std::uint64_t;
+using float16 = std::uint16_t; // half-precision bit storage
+using float32 = float;
+using float64 = double;
+using longdouble = long double;
+using complex64 = std::complex<float>;
+using complex128 = std::complex<double>;
+using clongdouble = std::complex<long double>;
+using bool_ = bool;
 // datetime64 / timedelta64 count their units in int64_t.
-using _Np_datetime64 = std::int64_t;
-using _Np_timedelta64 = std::int64_t;
+using datetime64 = std::int64_t;
+using timedelta64 = std::int64_t;
 // String dtypes have no contiguous scalar; use a string attribute.
-using _Np_string = std::string;
-using _Np_unicode = std::u32string;
+using string = std::string;
+using unicode = std::u32string;
 #else
 /**
  * @brief Classifier-based storage aliases used when
- *        `_NP_USE_DIRECT_STD_TYPES` is not defined.
+ *        `NP_USE_DIRECT_STD_TYPES` is not defined.
  *
- * Each alias is a `_Np_StorageClassifier` instantiation, binding a
+ * Each alias is a `storage_classifier` instantiation, binding a
  * compile-time `np::dtype` (`type`) to an instance of its native
  * C++ storage (`value_type`), so the storage is self-describing at
  * compile time while remaining usable as a plain scalar. `string_`
  * and `unicode_` use the string branch of the classifier; only
  * `void_` and `object_` have no fixed C++ storage.
  */
-using _Np_int8 = _Np_StorageClassifier<np::dtype::int8>;
-using _Np_int16 = _Np_StorageClassifier<np::dtype::int16>;
-using _Np_int32 = _Np_StorageClassifier<np::dtype::int32>;
-using _Np_int64 = _Np_StorageClassifier<np::dtype::int64>;
-using _Np_uint8 = _Np_StorageClassifier<np::dtype::uint8>;
-using _Np_uint16 = _Np_StorageClassifier<np::dtype::uint16>;
-using _Np_uint32 = _Np_StorageClassifier<np::dtype::uint32>;
-using _Np_uint64 = _Np_StorageClassifier<np::dtype::uint64>;
-using _Np_float16 = _Np_StorageClassifier<np::dtype::float16>;
-using _Np_float32 = _Np_StorageClassifier<np::dtype::float32>;
-using _Np_float64 = _Np_StorageClassifier<np::dtype::float64>;
-using _Np_longdouble = _Np_StorageClassifier<np::dtype::longdouble>;
-using _Np_complex64 = _Np_StorageClassifier<np::dtype::complex64>;
-using _Np_complex128 = _Np_StorageClassifier<np::dtype::complex128>;
-using _Np_clongdouble = _Np_StorageClassifier<np::dtype::clongdouble>;
-using _Np_bool_ = _Np_StorageClassifier<np::dtype::bool_>;
+using int8 = storage_classifier<np::dtype::int8>;
+using int16 = storage_classifier<np::dtype::int16>;
+using int32 = storage_classifier<np::dtype::int32>;
+using int64 = storage_classifier<np::dtype::int64>;
+using uint8 = storage_classifier<np::dtype::uint8>;
+using uint16 = storage_classifier<np::dtype::uint16>;
+using uint32 = storage_classifier<np::dtype::uint32>;
+using uint64 = storage_classifier<np::dtype::uint64>;
+using float16 = storage_classifier<np::dtype::float16>;
+using float32 = storage_classifier<np::dtype::float32>;
+using float64 = storage_classifier<np::dtype::float64>;
+using longdouble = storage_classifier<np::dtype::longdouble>;
+using complex64 = storage_classifier<np::dtype::complex64>;
+using complex128 = storage_classifier<np::dtype::complex128>;
+using clongdouble = storage_classifier<np::dtype::clongdouble>;
+using bool_ = storage_classifier<np::dtype::bool_>;
 // datetime64 / timedelta64 count their units in int64_t.
-using _Np_datetime64 = _Np_StorageClassifier<np::dtype::datetime64>;
-using _Np_timedelta64 = _Np_StorageClassifier<np::dtype::timedelta64>;
+using datetime64 = storage_classifier<np::dtype::datetime64>;
+using timedelta64 = storage_classifier<np::dtype::timedelta64>;
 // String dtypes use the string branch of the classifier.
-using _Np_string = _Np_StorageClassifier<np::dtype::string_>;
-using _Np_unicode = _Np_StorageClassifier<np::dtype::unicode_>;
+using string = storage_classifier<np::dtype::string_>;
+using unicode = storage_classifier<np::dtype::unicode_>;
 #endif
-} // namespace _Np_dtype
+} // namespace dtype_storage
 
-// Forward declaration for use in _dtype_t_from_type
+// Forward declaration for use in dtype_t_from_type
 template <dtype D> struct dtype_tag;
 
 /**
@@ -496,18 +553,18 @@ template <dtype D> struct dtype_tag;
  * kept for backward compatibility (see below).
  * @tparam T  A type (either a dtype_tag or a plain C++ type).
  */
-template <typename T> struct _dtype_t_from_type
+template <typename T> struct dtype_t_from_type
 {
     using type = T;
 };
-template <dtype D> struct _dtype_t_from_type<dtype_tag<D>>
+template <dtype D> struct dtype_t_from_type<dtype_tag<D>>
 {
-    using type = typename detail::_Np_type_to_cxx<D>::type;
+    using type = typename detail::dtype_to_cxx<D>::type;
 };
-template <typename T> using dtype_t = typename _dtype_t_from_type<T>::type;
+template <typename T> using dtype_t = typename dtype_t_from_type<T>::type;
 
 /** @brief Enum-based mapping (kept for backward compatibility). */
-template <dtype D> using dtype_t_enum = typename detail::_Np_type_to_cxx<D>::type;
+template <dtype D> using dtype_t_enum = typename detail::dtype_to_cxx<D>::type;
 
 // Keep `dtype_t<dtype::...>` working for code that passes enum values
 // (e.g. tests). Provide a variable-template-like overload via
@@ -525,7 +582,7 @@ template <dtype D> using dtype_t_enum = typename detail::_Np_type_to_cxx<D>::typ
 template <dtype D> struct dtype_tag
 {
     static constexpr dtype value = D;
-    using type = typename detail::_Np_type_to_cxx<D>::type;
+    using type = typename detail::dtype_to_cxx<D>::type;
     constexpr operator dtype() const noexcept
     {
         return D;
@@ -546,7 +603,7 @@ template <typename T> struct dtype_tag_to_type
 };
 template <dtype D> struct dtype_tag_to_type<dtype_tag<D>>
 {
-    using type = typename detail::_Np_type_to_cxx<D>::type;
+    using type = typename detail::dtype_to_cxx<D>::type;
 };
 
 // Type aliases usable as `ndarray<np::complex128>` – compile-time dtype → C++ type
@@ -597,7 +654,7 @@ namespace detail
  * @brief Compile-time check: the dtype is one of the numeric dtypes.
  *
  * True for every dtype that has a scalar `value_type` in
- * `_Np_type_to_cxx` (integers, floats, complex, bool_, datetime64
+ * `dtype_to_cxx` (integers, floats, complex, bool_, datetime64
  * and timedelta64). False for `string_`, `unicode_`, `void_` and
  * `object_`.
  *
@@ -639,7 +696,7 @@ template <dtype D> inline constexpr bool is_numeric_dtype_v = detail::is_numeric
  * @param t  The dtype value.
  * @return   A string_view naming the dtype (e.g. "int8", "float64").
  */
-NP_API NP_NODISCARD constexpr std::string_view dtype_name(dtype t)
+NP_API NP_NODISCARD constexpr std::string_view dtype_name(dtype t) noexcept
 {
     switch (t)
     {
@@ -689,45 +746,46 @@ NP_API NP_NODISCARD constexpr std::string_view dtype_name(dtype t)
         return "void";
     case dtype::object_:
         return "object";
+    default:
+        return "unknown";
     }
-    return "unknown";
 }
 
 /**
  * @brief Size in bytes of a dtype.
  *
  * Returns 0 for the special/variable dtypes (string_, unicode_,
- * void_, object_) and for longdouble/clongdouble (which are
- * platform-dependent).
+ * void_, object_, bigint). `longdouble`/`clongdouble` return the
+ * platform-dependent `sizeof`.
  *
  * @param t  The dtype value.
  * @return   Number of bytes, or 0 for variable-length types.
  */
-NP_API NP_NODISCARD constexpr std::size_t dtype_size(dtype t)
+NP_API NP_NODISCARD constexpr std::size_t dtype_size(dtype t) noexcept
 {
     switch (t)
     {
     case dtype::int8:
     case dtype::uint8:
     case dtype::bool_:
-        return 1;
+        return detail::kBytes1;
     case dtype::int16:
     case dtype::uint16:
     case dtype::float16:
-        return 2;
+        return detail::kBytes2;
     case dtype::int32:
     case dtype::uint32:
     case dtype::float32:
-        return 4;
+        return detail::kBytes4;
     case dtype::int64:
     case dtype::uint64:
     case dtype::float64:
     case dtype::complex64:
     case dtype::datetime64:
     case dtype::timedelta64:
-        return 8;
+        return detail::kBytes8;
     case dtype::complex128:
-        return 16;
+        return detail::kBytes16;
     case dtype::bigint:
         return 0; // variable-length arbitrary precision
     case dtype::longdouble:
@@ -739,8 +797,9 @@ NP_API NP_NODISCARD constexpr std::size_t dtype_size(dtype t)
     case dtype::void_:
     case dtype::object_:
         return 0;
+    default:
+        return 0;
     }
-    return 0;
 }
 
 /**
@@ -749,7 +808,7 @@ NP_API NP_NODISCARD constexpr std::size_t dtype_size(dtype t)
  * @param t  The dtype value.
  * @return   True if t is complex64, complex128, or clongdouble.
  */
-NP_API NP_NODISCARD constexpr bool dtype_is_complex(dtype t)
+NP_API NP_NODISCARD constexpr bool dtype_is_complex(dtype t) noexcept
 {
     return t == dtype::complex64 || t == dtype::complex128 || t == dtype::clongdouble;
 }
@@ -760,7 +819,7 @@ NP_API NP_NODISCARD constexpr bool dtype_is_complex(dtype t)
  * @param t  The dtype value.
  * @return   True if t is float16, float32, float64, or longdouble.
  */
-NP_API NP_NODISCARD constexpr bool dtype_is_floating(dtype t)
+NP_API NP_NODISCARD constexpr bool dtype_is_floating(dtype t) noexcept
 {
     return t == dtype::float16 || t == dtype::float32 || t == dtype::float64 || t == dtype::longdouble;
 }
@@ -771,7 +830,7 @@ NP_API NP_NODISCARD constexpr bool dtype_is_floating(dtype t)
  * @param t  The dtype value.
  * @return   True if t is int8 through uint64.
  */
-NP_API NP_NODISCARD constexpr bool dtype_is_integer(dtype t)
+NP_API NP_NODISCARD constexpr bool dtype_is_integer(dtype t) noexcept
 {
     return (t >= dtype::int8 && t <= dtype::uint64) || t == dtype::bigint;
 }
@@ -782,7 +841,7 @@ NP_API NP_NODISCARD constexpr bool dtype_is_integer(dtype t)
  * @param t  The dtype value.
  * @return   True if t is int8 through int64.
  */
-NP_API NP_NODISCARD constexpr bool dtype_is_signed(dtype t)
+NP_API NP_NODISCARD constexpr bool dtype_is_signed(dtype t) noexcept
 {
     return t >= dtype::int8 && t <= dtype::int64;
 }
@@ -793,7 +852,7 @@ NP_API NP_NODISCARD constexpr bool dtype_is_signed(dtype t)
  * @param t  The dtype value.
  * @return   True if t is uint8 through uint64.
  */
-NP_API NP_NODISCARD constexpr bool dtype_is_unsigned(dtype t)
+NP_API NP_NODISCARD constexpr bool dtype_is_unsigned(dtype t) noexcept
 {
     return t >= dtype::uint8 && t <= dtype::uint64;
 }
@@ -804,7 +863,7 @@ NP_API NP_NODISCARD constexpr bool dtype_is_unsigned(dtype t)
  * @param t  The dtype value.
  * @return   True if t is bool_.
  */
-NP_API NP_NODISCARD constexpr bool dtype_is_bool(dtype t)
+NP_API NP_NODISCARD constexpr bool dtype_is_bool(dtype t) noexcept
 {
     return t == dtype::bool_;
 }
@@ -813,77 +872,77 @@ NP_API NP_NODISCARD constexpr bool dtype_is_bool(dtype t)
 
 namespace detail
 {
-inline constexpr int _dtype_rank(dtype t) noexcept
+inline constexpr int dtype_rank(dtype t) noexcept
 {
     switch (t)
     {
     case dtype::bool_:
-        return 0;
+        return kRankBool;
     case dtype::int8:
-        return 1;
+        return kRankInt8;
     case dtype::int16:
-        return 2;
+        return kRankInt16;
     case dtype::int32:
-        return 3;
+        return kRankInt32;
     case dtype::int64:
-        return 4;
+        return kRankInt64;
     case dtype::uint8:
-        return 5;
+        return kRankUint8;
     case dtype::uint16:
-        return 6;
+        return kRankUint16;
     case dtype::uint32:
-        return 7;
+        return kRankUint32;
     case dtype::uint64:
-        return 8;
+        return kRankUint64;
     case dtype::bigint:
-        return 9;
+        return kRankBigint;
     case dtype::float16:
-        return 10;
+        return kRankFloat16;
     case dtype::float32:
-        return 11;
+        return kRankFloat32;
     case dtype::float64:
-        return 12;
+        return kRankFloat64;
     case dtype::longdouble:
-        return 13;
+        return kRankLongdouble;
     case dtype::complex64:
-        return 14;
+        return kRankComplex64;
     case dtype::complex128:
-        return 15;
+        return kRankComplex128;
     case dtype::clongdouble:
-        return 16;
+        return kRankClongdouble;
     case dtype::datetime64:
-        return 17;
+        return kRankDatetime;
     case dtype::timedelta64:
-        return 17;
+        return kRankDatetime;
     case dtype::string_:
-        return 18;
+        return kRankString;
     case dtype::unicode_:
-        return 19;
+        return kRankUnicode;
     case dtype::void_:
-        return 20;
+        return kRankVoid;
     case dtype::object_:
-        return 21;
+        return kRankObject;
     }
-    return 21;
+    return kRankObject;
 }
 
-inline constexpr int _dtype_kind(dtype t) noexcept
+inline constexpr int dtype_kind(dtype t) noexcept
 {
     if (t == dtype::bool_)
-        return 0;
+        return kKindBool;
     if (t == dtype::bigint)
-        return 1; // bigint is signed arbitrary integer
+        return kKindInt; // bigint is signed arbitrary integer
     if (t >= dtype::int8 && t <= dtype::int64)
-        return 1;
+        return kKindInt;
     if (t >= dtype::uint8 && t <= dtype::uint64)
-        return 2;
+        return kKindUint;
     if (t == dtype::float16 || t == dtype::float32 || t == dtype::float64 || t == dtype::longdouble)
-        return 3;
+        return kKindFloat;
     if (t == dtype::complex64 || t == dtype::complex128 || t == dtype::clongdouble)
-        return 4;
+        return kKindComplex;
     if (t == dtype::datetime64 || t == dtype::timedelta64)
-        return 5;
-    return 6;
+        return kKindDatetime;
+    return kKindOther;
 }
 } // namespace detail
 
@@ -896,7 +955,7 @@ inline constexpr int _dtype_kind(dtype t) noexcept
  *
  * Reference: numpy-reference/reference/generated/numpy.can_cast.html
  */
-NP_API NP_NODISCARD inline bool can_cast(dtype from, dtype to, const std::string &casting = "safe")
+NP_API NP_NODISCARD inline bool can_cast(dtype from, dtype to, std::string_view casting = "safe") noexcept
 {
     if (from == to)
     {
@@ -910,16 +969,16 @@ NP_API NP_NODISCARD inline bool can_cast(dtype from, dtype to, const std::string
     {
         return false;
     }
-    int rf = detail::_dtype_rank(from);
-    int rt = detail::_dtype_rank(to);
-    int kf = detail::_dtype_kind(from);
-    int kt = detail::_dtype_kind(to);
+    int rf = detail::dtype_rank(from);
+    int rt = detail::dtype_rank(to);
+    int kf = detail::dtype_kind(from);
+    int kt = detail::dtype_kind(to);
     if (casting == "same_kind")
     {
         if (kf != kt)
         {
             // bool -> int/uint is considered same_kind in NumPy
-            if (kf == 0 && (kt == 1 || kt == 2))
+            if (kf == detail::kKindBool && (kt == detail::kKindInt || kt == detail::kKindUint))
             {
                 return true;
             }
@@ -932,33 +991,33 @@ NP_API NP_NODISCARD inline bool can_cast(dtype from, dtype to, const std::string
     {
         return true;
     }
-    if (kf == 1) // int
+    if (kf == detail::kKindInt) // int
     {
-        if (kt == 1)
+        if (kt == detail::kKindInt)
             return rt >= rf;
-        if (kt == 2)
+        if (kt == detail::kKindUint)
             return false; // int -> uint not safe (may overflow)
-        if (kt == 3 || kt == 4)
+        if (kt == detail::kKindFloat || kt == detail::kKindComplex)
             return rt >= rf;
         return false;
     }
-    if (kf == 2) // uint
+    if (kf == detail::kKindUint) // uint
     {
-        if (kt == 2)
+        if (kt == detail::kKindUint)
             return rt >= rf;
-        if (kt == 3 || kt == 4)
-            return rt >= rf;
-        return false;
-    }
-    if (kf == 3) // float
-    {
-        if (kt == 3 || kt == 4)
+        if (kt == detail::kKindFloat || kt == detail::kKindComplex)
             return rt >= rf;
         return false;
     }
-    if (kf == 4) // complex
+    if (kf == detail::kKindFloat) // float
     {
-        if (kt == 4)
+        if (kt == detail::kKindFloat || kt == detail::kKindComplex)
+            return rt >= rf;
+        return false;
+    }
+    if (kf == detail::kKindComplex) // complex
+    {
+        if (kt == detail::kKindComplex)
             return rt >= rf;
         return false;
     }
@@ -970,14 +1029,14 @@ NP_API NP_NODISCARD inline bool can_cast(dtype from, dtype to, const std::string
  *
  * Reference: numpy-reference/reference/generated/numpy.promote_types.html
  */
-NP_API NP_NODISCARD inline dtype promote_types(dtype a, dtype b)
+NP_API NP_NODISCARD inline dtype promote_types(dtype a, dtype b) noexcept
 {
     if (a == b)
     {
         return a;
     }
-    int ra = detail::_dtype_rank(a);
-    int rb = detail::_dtype_rank(b);
+    int ra = detail::dtype_rank(a);
+    int rb = detail::dtype_rank(b);
     return ra >= rb ? a : b;
 }
 
@@ -1001,7 +1060,9 @@ NP_API inline dtype result_type(std::initializer_list<dtype> dtypes)
     return cur;
 }
 
-NP_API template <typename... Ds> NP_NODISCARD inline dtype result_type(dtype first, Ds... rest)
+NP_API template <typename... Ds>
+    requires((std::same_as<Ds, dtype> && ...))
+NP_NODISCARD inline dtype result_type(dtype first, Ds... rest) noexcept
 {
     dtype cur = first;
     ((cur = promote_types(cur, rest)), ...);
@@ -1013,8 +1074,8 @@ NP_API template <typename... Ds> NP_NODISCARD inline dtype result_type(dtype fir
  *
  * Reference: numpy-reference/reference/generated/numpy.find_common_type.html
  */
-NP_API inline dtype find_common_type(std::initializer_list<dtype> array_types,
-                                     std::initializer_list<dtype> scalar_types)
+NP_API NP_NODISCARD inline dtype find_common_type(std::initializer_list<dtype> array_types,
+                                                  std::initializer_list<dtype> scalar_types) noexcept
 {
     dtype cur = dtype::bool_;
     bool has = false;
@@ -1054,31 +1115,31 @@ NP_API inline dtype common_type(std::initializer_list<dtype> dtypes)
  *
  * Reference: numpy-reference/reference/generated/numpy.min_scalar_type.html
  */
-NP_API NP_NODISCARD inline dtype min_scalar_type(long long v)
+NP_API NP_NODISCARD inline dtype min_scalar_type(long long v) noexcept
 {
     if (v >= 0)
     {
-        if (v <= 127)
+        if (v <= detail::kInt8Max)
             return dtype::int8;
-        if (v <= 32767)
+        if (v <= detail::kInt16Max)
             return dtype::int16;
-        if (v <= 2147483647)
+        if (v <= detail::kInt32Max)
             return dtype::int32;
         return dtype::int64;
     }
     else
     {
-        if (v >= -128)
+        if (v >= detail::kInt8Min)
             return dtype::int8;
-        if (v >= -32768)
+        if (v >= detail::kInt16Min)
             return dtype::int16;
-        if (v >= -2147483648LL)
+        if (v >= detail::kInt32Min)
             return dtype::int32;
         return dtype::int64;
     }
 }
 
-NP_API NP_NODISCARD inline dtype min_scalar_type(double v)
+NP_API NP_NODISCARD inline dtype min_scalar_type(double v) noexcept
 {
     (void)v;
     return dtype::float64;
@@ -1089,7 +1150,7 @@ NP_API NP_NODISCARD inline dtype min_scalar_type(double v)
  *
  * Reference: numpy-reference/reference/generated/numpy.issubdtype.html
  */
-NP_API NP_NODISCARD inline bool issubdtype(dtype a, dtype b)
+NP_API NP_NODISCARD inline bool issubdtype(dtype a, dtype b) noexcept
 {
     if (a == b)
     {
@@ -1101,17 +1162,17 @@ NP_API NP_NODISCARD inline bool issubdtype(dtype a, dtype b)
     // kind expansion: b being a generic placeholder is simulated via
     // callers passing the most general dtype of that kind.
     // Check kind containment:
-    int ka = detail::_dtype_kind(a);
-    int kb = detail::_dtype_kind(b);
+    int ka = detail::dtype_kind(a);
+    int kb = detail::dtype_kind(b);
     // If b is the maximal rank of its kind, treat as generic kind check
     // Example: b == int64 represents "signedinteger", b == float64 -> "floating"
-    if (kb == 1 && ka == 1)
+    if (kb == detail::kKindInt && ka == detail::kKindInt)
         return true;
-    if (kb == 2 && ka == 2)
+    if (kb == detail::kKindUint && ka == detail::kKindUint)
         return true;
-    if (kb == 3 && ka == 3)
+    if (kb == detail::kKindFloat && ka == detail::kKindFloat)
         return true;
-    if (kb == 4 && ka == 4)
+    if (kb == detail::kKindComplex && ka == detail::kKindComplex)
         return true;
     return false;
 }
@@ -1120,7 +1181,7 @@ NP_API NP_NODISCARD inline bool issubdtype(dtype a, dtype b)
  * @brief Whether `a` is sub-class of `b` (np.issubsctype).
  * Alias to `issubdtype` for enum dtypes.
  */
-NP_API NP_NODISCARD inline bool issubsctype(dtype a, dtype b)
+NP_API NP_NODISCARD inline bool issubsctype(dtype a, dtype b) noexcept
 {
     return issubdtype(a, b);
 }
@@ -1128,7 +1189,7 @@ NP_API NP_NODISCARD inline bool issubsctype(dtype a, dtype b)
 /**
  * @brief Whether dtype is a scalar type (np.issctype).
  */
-NP_API NP_NODISCARD inline bool issctype(dtype t)
+NP_API NP_NODISCARD inline bool issctype(dtype t) noexcept
 {
     return t != dtype::void_ && t != dtype::object_;
 }
@@ -1137,7 +1198,7 @@ NP_API NP_NODISCARD inline bool issctype(dtype t)
  * @brief Whether object is scalar type (np.isscalar).
  * Overload for dtype enum already in `logic.hpp`; this is the dtype form.
  */
-NP_API NP_NODISCARD inline bool issubsctype_check(dtype t)
+NP_API NP_NODISCARD inline bool issubsctype_check(dtype t) noexcept
 {
     return issctype(t);
 }
@@ -1145,12 +1206,12 @@ NP_API NP_NODISCARD inline bool issubsctype_check(dtype t)
 /**
  * @brief Convert dtype to its scalar type (np.obj2sctype).
  */
-NP_API NP_NODISCARD inline dtype obj2sctype(dtype t)
+NP_API NP_NODISCARD inline dtype obj2sctype(dtype t) noexcept
 {
     return t;
 }
 
-NP_API NP_NODISCARD inline dtype obj2sctype(const std::string &name)
+NP_API NP_NODISCARD inline dtype obj2sctype(std::string_view name) noexcept
 {
     for (auto d : {dtype::int8, dtype::int16, dtype::int32, dtype::int64, dtype::uint8, dtype::uint16, dtype::uint32,
                    dtype::uint64, dtype::float32, dtype::float64, dtype::complex64, dtype::complex128, dtype::bool_})
@@ -1166,7 +1227,7 @@ NP_API NP_NODISCARD inline dtype obj2sctype(const std::string &name)
  *
  * Reference: numpy-reference/reference/generated/numpy.sctype2char.html
  */
-NP_API NP_NODISCARD inline char sctype2char(dtype t)
+NP_API NP_NODISCARD inline char sctype2char(dtype t) noexcept
 {
     switch (t)
     {
@@ -1216,8 +1277,9 @@ NP_API NP_NODISCARD inline char sctype2char(dtype t)
         return 'V';
     case dtype::object_:
         return 'O';
+    default:
+        return '?';
     }
-    return '?';
 }
 
 /**
@@ -1414,13 +1476,12 @@ NP_API NP_NODISCARD inline char mintypecode(const std::string &charlist, bool al
  *
  * Reference: numpy-reference/reference/generated/numpy.finfo.html
  */
-template <typename T> struct finfo_t
+template <std::floating_point T> struct finfo_t
 {
-    static_assert(std::is_floating_point_v<T>, "finfo_t: floating required");
     T eps = std::numeric_limits<T>::epsilon();
     T max = std::numeric_limits<T>::max();
     T min = std::numeric_limits<T>::lowest();
-    int bits = sizeof(T) * 8;
+    int bits = sizeof(T) * detail::kBitsPerByte;
     int nexp = std::numeric_limits<T>::max_exponent;
     int nmant = std::numeric_limits<T>::digits;
 };
@@ -1448,26 +1509,26 @@ NP_API NP_NODISCARD inline auto finfo(dtype t)
     switch (t)
     {
     case dtype::float16:
-        info.eps = 0.0009765625;
-        info.bits = 16;
+        info.eps = detail::kFloat16Eps;
+        info.bits = detail::kBits16;
         break;
     case dtype::float32:
         info.eps = std::numeric_limits<float>::epsilon();
         info.max = std::numeric_limits<float>::max();
         info.min = std::numeric_limits<float>::lowest();
-        info.bits = 32;
+        info.bits = detail::kBits32;
         break;
     case dtype::float64:
         info.eps = std::numeric_limits<double>::epsilon();
         info.max = std::numeric_limits<double>::max();
         info.min = std::numeric_limits<double>::lowest();
-        info.bits = 64;
+        info.bits = detail::kBits64;
         break;
     case dtype::longdouble:
         info.eps = std::numeric_limits<long double>::epsilon();
         info.max = static_cast<double>(std::numeric_limits<long double>::max());
         info.min = static_cast<double>(std::numeric_limits<long double>::lowest());
-        info.bits = static_cast<int>(sizeof(long double) * 8);
+        info.bits = static_cast<int>(sizeof(long double) * detail::kBitsPerByte);
         break;
     default:
         throw std::invalid_argument("finfo: not a floating dtype");
@@ -1480,12 +1541,11 @@ NP_API NP_NODISCARD inline auto finfo(dtype t)
  *
  * Reference: numpy-reference/reference/generated/numpy.iinfo.html
  */
-template <typename T> struct iinfo_t
+template <std::integral T> struct iinfo_t
 {
-    static_assert(std::is_integral_v<T>, "iinfo_t: integral required");
     T min = std::numeric_limits<T>::min();
     T max = std::numeric_limits<T>::max();
-    int bits = sizeof(T) * 8;
+    int bits = sizeof(T) * detail::kBitsPerByte;
     char kind = std::is_signed_v<T> ? 'i' : 'u';
 };
 
@@ -1493,7 +1553,8 @@ NP_API NP_NODISCARD inline auto iinfo(dtype t)
 {
     struct Info
     {
-        long long min = 0, max = 0;
+        long long min = 0;
+        unsigned long long max = 0;
         int bits = 0;
     } info{};
     switch (t)
@@ -1501,42 +1562,42 @@ NP_API NP_NODISCARD inline auto iinfo(dtype t)
     case dtype::int8:
         info.min = std::numeric_limits<std::int8_t>::min();
         info.max = std::numeric_limits<std::int8_t>::max();
-        info.bits = 8;
+        info.bits = detail::kBits8;
         break;
     case dtype::int16:
         info.min = std::numeric_limits<std::int16_t>::min();
         info.max = std::numeric_limits<std::int16_t>::max();
-        info.bits = 16;
+        info.bits = detail::kBits16;
         break;
     case dtype::int32:
         info.min = std::numeric_limits<std::int32_t>::min();
         info.max = std::numeric_limits<std::int32_t>::max();
-        info.bits = 32;
+        info.bits = detail::kBits32;
         break;
     case dtype::int64:
         info.min = std::numeric_limits<std::int64_t>::min();
         info.max = std::numeric_limits<std::int64_t>::max();
-        info.bits = 64;
+        info.bits = detail::kBits64;
         break;
     case dtype::uint8:
         info.min = 0;
         info.max = std::numeric_limits<std::uint8_t>::max();
-        info.bits = 8;
+        info.bits = detail::kBits8;
         break;
     case dtype::uint16:
         info.min = 0;
         info.max = std::numeric_limits<std::uint16_t>::max();
-        info.bits = 16;
+        info.bits = detail::kBits16;
         break;
     case dtype::uint32:
         info.min = 0;
         info.max = std::numeric_limits<std::uint32_t>::max();
-        info.bits = 32;
+        info.bits = detail::kBits32;
         break;
     case dtype::uint64:
         info.min = 0;
-        info.max = static_cast<long long>(std::numeric_limits<std::uint64_t>::max());
-        info.bits = 64;
+        info.max = std::numeric_limits<std::uint64_t>::max();
+        info.bits = detail::kBits64;
         break;
     default:
         throw std::invalid_argument("iinfo: not an integer dtype");
@@ -1554,7 +1615,7 @@ NP_API NP_NODISCARD inline auto iinfo(dtype t)
  * `kind` can be a dtype enum value or a string such as "int", "float",
  * "complex", "bool", "signed integer", "unsigned integer".
  */
-NP_API NP_NODISCARD inline bool isdtype(dtype dt, const std::string &kind)
+NP_API NP_NODISCARD inline bool isdtype(dtype dt, std::string_view kind) noexcept
 {
     if (kind == "bool")
         return dt == dtype::bool_;
@@ -1574,7 +1635,7 @@ NP_API NP_NODISCARD inline bool isdtype(dtype dt, const std::string &kind)
     return dtype_name(dt) == kind;
 }
 
-NP_API NP_NODISCARD inline bool isdtype(dtype dt, dtype kind)
+NP_API NP_NODISCARD inline bool isdtype(dtype dt, dtype kind) noexcept
 {
     return issubdtype(dt, kind);
 }
@@ -1584,7 +1645,7 @@ NP_API NP_NODISCARD inline bool isdtype(dtype dt, dtype kind)
  *
  * Reference: numpy-reference/reference/generated/numpy.issubclass_.html
  */
-NP_API NP_NODISCARD inline bool issubclass_(dtype a, dtype b)
+NP_API NP_NODISCARD inline bool issubclass_(dtype a, dtype b) noexcept
 {
     return issubdtype(a, b);
 }
@@ -1599,9 +1660,10 @@ namespace rec
  * Parses a format string like "i4,f8,a10" into dtype descriptors.
  * Here it returns the parsed dtype names as strings.
  */
-NP_API inline std::vector<std::string> format_parser(const std::string &formats)
+NP_API inline std::vector<std::string> format_parser(std::string_view formats)
 {
     std::vector<std::string> out;
+    out.reserve(formats.size() / 2 + 1);
     std::string cur;
     for (char c : formats)
     {

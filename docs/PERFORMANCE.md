@@ -1,6 +1,6 @@
 # Performance — dev micro-opts
 
-All opts are `[[likely]]` guarded with fallback; 22/22 tests still pass. Bench with `bench_math` (AVX) and `ctest --verbose`.
+All opts are `[[likely]]` guarded with fallback; 49/49 tests still pass. Bench with `bench_math` (AVX) and `ctest --verbose`.
 
 ## 1. ndarray hot paths — `ndarray.hpp`
 

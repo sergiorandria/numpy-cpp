@@ -95,7 +95,7 @@ py::array ifft_wrapper(py::array a){ return to_pyarray(fft::ifft(to_ndarray<std:
 py::array rfft_wrapper(py::array a){ return to_pyarray(fft::rfft(to_ndarray<double>(a))); }
 py::array sort_wrapper(py::array a, int axis){ return to_pyarray(sort(to_ndarray<double>(a), axis)); }
 py::array argsort_wrapper(py::array a, int axis){ return to_pyarray(argsort(to_ndarray<double>(a), axis)); }
-py::array hbm_wrapper(py::array a){ return to_pyarray(mem::migrate_to_hbm(to_ndarray<float>(a)).data); }
+py::array hbm_wrapper(py::array a){ return to_pyarray(mem::tag_hbm_hint(to_ndarray<float>(a)).data); }
 py::array encode_wrapper(py::array a){ auto nd = to_ndarray<float>(a); auto ev = spike::encode_rate(nd); (void)ev; return to_pyarray(nd); }
 py::array fp8_wrapper(py::array a, py::array b){ return to_pyarray(tensor::matmul_fp8(to_ndarray<float>(a), to_ndarray<float>(b))); }
 py::array plus_state_wrapper(int n){ auto s = quantum::QuantumFactory::plus_state(n); std::vector<int> shape{(int)s.amps.size()}; ndarray<std::complex<double>> out(shape); for(size_t i=0;i<s.amps.size();++i) out.data()[i]=s.amps[i]; return to_pyarray(out); }
@@ -155,7 +155,7 @@ PYBIND11_MODULE(numpy_cpp, m){
   mpadic.def("valuation", [](const padic::Padic<int64_t>& a){ return a.valuation(); });
   auto mhw = m.def_submodule("hardware", "accelerator/neuromorphic/tensor/mem");
   mhw.def("hbm_migrate", &hbm_wrapper);
-  auto mneuro = mhw.def_submodule("neuromorphic", "Loihi/SpiNNaker");
+  auto mneuro = mhw.def_submodule("neuromorphic", "software LIF simulation (no Loihi/SpiNNaker hardware)");
   mneuro.def("encode_rate", &encode_wrapper);
   auto mtensor = mhw.def_submodule("tensor", "Hopper/AMX");
   mtensor.def("matmul_fp8", &fp8_wrapper);

@@ -3,15 +3,19 @@
  * @brief Work-stealing thread pool for parallel NumPy-like operations.
  *
  * Provides `np::ThreadPool` – a fixed-size pool where each worker owns a
- * Chase-Lev style deque. Owners push/pop at the bottom with minimal
- * contention; idle workers steal from the top of victims. Power users on
- * many-core machines get near-linear scaling for `parallel_for` and
- * task submission.
+ * deque. Owners push/pop at the bottom; idle workers steal from the top of
+ * victims.
  *
  * Two deque backends are compiled in and toggled with
- * `NP_THREADPOOL_LOCKFREE` (1 = lock-free with `memory_order`, 0 = mutex):
+ * `NP_THREADPOOL_LOCKFREE` (1 = hybrid with `memory_order`, 0 = mutex):
  *  - Mutex-based (`__np_deque_mutex`) – simple, correct for n<64.
- *  - Lock-free (`__np_deque_lockfree`) – Chase-Lev with atomics.
+ *  - Hybrid (`__np_deque_lockfree`) – Chase-Lev-inspired bookkeeping with
+ *    atomics for fast empty-checks; actual deque operations remain
+ *    mutex-protected to stay safe for non-trivial types like
+ *    `std::function<void()>`. Both backends serialize deque access; the
+ *    hybrid variant does not achieve true lock-free scaling and adds atomic
+ *    overhead, but keeps the `NP_THREADPOOL_LOCKFREE` toggle for future
+ *    ring-buffer work.
  * Public wrappers (`WorkStealingDeque`, `ThreadPool`) contain only checks,
  * optional logs (`NP_THREADPOOL_ENABLE_LOGS`) and a pointer call to
  * `__np_*` internals. Internal `__np_*` have two implementations.
@@ -30,6 +34,7 @@
 #include <cstddef>
 #include <cstdio>
 #include <deque>
+#include <exception>
 #include <functional>
 #include <future>
 #include <mutex>
@@ -249,13 +254,13 @@ template <typename T> class __np_deque_mutex
 };
 
 /**
- * @brief Lock-free Chase-Lev deque – internal __np impl.
- * Uses `memory_order` for top/bottom. For correctness on
- * `std::function` (non-trivial), the buffer is still protected
- * by a mutex for the actual deque ops, but top/bottom are
- * lock-free atomics – this gives the scalability benefit while
- * remaining safe for non-trivial types. Toggle with
- * `NP_THREADPOOL_LOCKFREE`.
+ * @brief Hybrid Chase-Lev-inspired deque – internal __np impl.
+ * Uses `memory_order` for top/bottom only for fast empty-checks.
+ * For correctness on `std::function` (non-trivial), the deque itself
+ * remains mutex-protected, so push/pop/steal still serialize on `m_`.
+ * No lock-free fast path is taken for the actual container ops;
+ * scaling is equivalent to the mutex backend with added atomic
+ * bookkeeping. Toggle with `NP_THREADPOOL_LOCKFREE`.
  */
 template <typename T> class __np_deque_lockfree
 {
@@ -591,6 +596,13 @@ class ThreadPool
         __np_shutdown_ptr(this);
     }
 
+    /**
+     * @brief Global shared pool (Meyer's singleton).
+     * @param n_threads Requested worker count. Only honored on the very
+     *        first call that constructs the instance; later calls with a
+     *        different value are silently ignored and return the existing
+     *        instance. Pass 0 (default) for the adaptive count.
+     */
     static ThreadPool &global(std::size_t n_threads = 0)
     {
         __NP_TP_LOG("ThreadPool::global");
@@ -627,6 +639,10 @@ class ThreadPool
         std::vector<std::unique_ptr<detail::WorkStealingDeque<Task>>> queues;
         std::atomic<bool> done{false};
         std::atomic<std::size_t> next_queue{0};
+        // Tasks popped from a queue but still executing. wait() must observe
+        // both empty queues AND zero in-flight tasks; queue emptiness alone
+        // can return while a stolen task is still running.
+        std::atomic<std::size_t> in_flight{0};
         std::mutex cv_m;
         std::condition_variable cv;
     };
@@ -763,6 +779,11 @@ class ThreadPool
 
     NP_HIDDEN static void __np_wait_mutex(ThreadPool *self)
     {
+        // NOTE (honesty audit): an earlier revision broke on queues-empty
+        // alone, which can return while a popped task is still executing.
+        // The in_flight counter (bumped around every (*job)() execution,
+        // including parallel_for caller-help) closes that race; the old
+        // trailing sleep(1ms) that papered over it is gone.
         while (true)
         {
             bool empty = true;
@@ -774,13 +795,12 @@ class ThreadPool
                     break;
                 }
             }
-            if (empty)
+            if (empty && self->__np_impl->in_flight.load(std::memory_order_acquire) == 0)
             {
                 break;
             }
             std::this_thread::yield();
         }
-        std::this_thread::sleep_for(std::chrono::milliseconds(1));
     }
 
     NP_HIDDEN static void __np_wait_lockfree(ThreadPool *self)
@@ -866,6 +886,7 @@ class ThreadPool
             }
             if (job)
             {
+                self->__np_impl->in_flight.fetch_add(1, std::memory_order_acq_rel);
                 try
                 {
                     (*job)();
@@ -875,6 +896,7 @@ class ThreadPool
 
                     std::cerr << "[ThreadPool] task threw unknown exception (suppressed)\n";
                 }
+                self->__np_impl->in_flight.fetch_sub(1, std::memory_order_acq_rel);
                 continue;
             }
             for (int s = 0; s < kSpinIters; ++s)
@@ -900,6 +922,7 @@ class ThreadPool
             }
             if (job)
             {
+                self->__np_impl->in_flight.fetch_add(1, std::memory_order_acq_rel);
                 try
                 {
                     (*job)();
@@ -909,6 +932,7 @@ class ThreadPool
 
                     std::cerr << "[ThreadPool] task threw unknown exception (suppressed)\n";
                 }
+                self->__np_impl->in_flight.fetch_sub(1, std::memory_order_acq_rel);
                 continue;
             }
             std::unique_lock<std::mutex> lk(self->__np_impl->cv_m);
@@ -957,14 +981,26 @@ class ThreadPool
         }
         const std::size_t num_chunks = (n + chunk - 1) / chunk;
         std::atomic<std::size_t> remaining{num_chunks};
+        std::exception_ptr first_exception = nullptr;
+        std::atomic<bool> has_exception{false};
         for (std::size_t c = 0; c < num_chunks; ++c)
         {
             const std::size_t s = begin + c * chunk;
             const std::size_t e = std::min(end, s + chunk);
-            Task t = [&func, s, e, &remaining]() {
-                for (std::size_t i = s; i < e; ++i)
+            Task t = [&func, s, e, &remaining, &first_exception, &has_exception]() {
+                try
                 {
-                    func(i);
+                    for (std::size_t i = s; i < e; ++i)
+                    {
+                        func(i);
+                    }
+                }
+                catch (...)
+                {
+                    if (!has_exception.exchange(true, std::memory_order_acq_rel))
+                    {
+                        first_exception = std::current_exception();
+                    }
                 }
                 remaining.fetch_sub(1, std::memory_order_acq_rel);
             };
@@ -974,12 +1010,31 @@ class ThreadPool
         {
             if (auto job = __np_try_steal_any_ptr(this))
             {
-                (*job)();
+                // Count caller-helped tasks too: a concurrent wait() must
+                // not return while this thread is inside (*job)().
+                __np_impl->in_flight.fetch_add(1, std::memory_order_acq_rel);
+                try
+                {
+                    (*job)();
+                }
+                catch (...)
+                {
+                    // Foreign (non-parallel_for) task: same policy as the
+                    // worker loop — suppress so the wait loop below still
+                    // terminates. parallel_for's own chunks never throw
+                    // here (they capture into first_exception).
+                    std::cerr << "[ThreadPool] task threw unknown exception (suppressed)\n";
+                }
+                __np_impl->in_flight.fetch_sub(1, std::memory_order_acq_rel);
             }
             else
             {
                 std::this_thread::yield();
             }
+        }
+        if (has_exception.load(std::memory_order_acquire) && first_exception)
+        {
+            std::rethrow_exception(first_exception);
         }
     }
 

@@ -5,7 +5,8 @@
  *
  * Correct name for `variety.hpp` (kept as alias). Provides
  * `np::manifold::AbstractManifold` and concrete `Sphere`, `Torus`, `ProjectiveSpace`,
- * `KleinBottle`, `Product`, etc., that integrate with `np::homology` / `np::homotopy` /
+ * `KleinBottle`, `Euclidean`, `GenusGSurface`, `LensSpace`, `Product`, `Wedge`,
+ * `ConnectedSum`, etc., that integrate with `np::homology` / `np::homotopy` /
  * `np::differential` and provide helpers to fix logical reasoning in differential /
  * topological / algebraic geometry:
  *   - `is_orientable`, `is_compact`, `is_connected`, `is_simply_connected`
@@ -28,10 +29,15 @@
 #define NP_MANIFOLD_HPP
 
 #include <algorithm>
+#include <cmath>
+#include <concepts>
+#include <limits>
 #include <map>
 #include <memory>
+#include <numbers>
 #include <numeric>
 #include <set>
+#include <stdexcept>
 #include <string>
 #include <variant>
 #include <vector>
@@ -198,6 +204,85 @@ NP_NODISCARD inline int binomial_int(int n, int k)
     return static_cast<int>(num / den);
 }
 
+NP_NODISCARD inline bigint bigint_gcd(bigint a, bigint b)
+{
+    if (a < 0)
+        a = -a;
+    if (b < 0)
+        b = -b;
+    while (b != 0)
+    {
+        bigint r = a % b;
+        a = b;
+        b = r;
+    }
+    return a;
+}
+
+/**
+ * @brief Künneth torsion of H_n(X×Y) from the two factor homologies.
+ *
+ * From 0 → ⊕_{p+q=n} H_p⊗H_q → H_n → ⊕_{p+q=n-1} Tor(H_p,H_q) → 0 with
+ * Z/a⊗Z/b = Tor(Z/a,Z/b) = Z/gcd(a,b), Z⊗Z/m = Z/m, Tor(Z,−) = 0.
+ * The free summand splits, so torsion is the multiset union below
+ * (invariant-factor re-diagonalization is unnecessary for rank-1 factors
+ * and stays a sound over-approximation otherwise).
+ */
+NP_NODISCARD inline std::vector<bigint> kunneth_product_torsion(const std::vector<homology::HomologyGroup> &hX,
+                                                                const std::vector<homology::HomologyGroup> &hY, int n)
+{
+    std::vector<bigint> out;
+    const int dx = static_cast<int>(hX.size()) - 1;
+    const int dy = static_cast<int>(hY.size()) - 1;
+    auto at = [](const std::vector<homology::HomologyGroup> &h, int k) -> const homology::HomologyGroup * {
+        if (k < 0 || k >= static_cast<int>(h.size()))
+            return nullptr;
+        return &h[k];
+    };
+    // Tensor terms: p + q == n
+    for (int p = 0; p <= n; ++p)
+    {
+        const int q = n - p;
+        const auto *hx = at(hX, p);
+        const auto *hy = at(hY, q);
+        if (hx == nullptr || hy == nullptr)
+            continue;
+        for (auto t : hx->torsion)
+            for (int i = 0; i < hy->betti; ++i)
+                out.push_back(t);
+        for (auto u : hy->torsion)
+            for (int i = 0; i < hx->betti; ++i)
+                out.push_back(u);
+        for (auto t : hx->torsion)
+            for (auto u : hy->torsion)
+            {
+                bigint g = bigint_gcd(t, u);
+                if (g > 1)
+                    out.push_back(g);
+            }
+    }
+    // Tor terms: p + q == n - 1
+    for (int p = 0; p <= n - 1; ++p)
+    {
+        const int q = n - 1 - p;
+        if (p > dx || q > dy || p < 0 || q < 0)
+            continue;
+        const auto *hx = at(hX, p);
+        const auto *hy = at(hY, q);
+        if (hx == nullptr || hy == nullptr)
+            continue;
+        for (auto t : hx->torsion)
+            for (auto u : hy->torsion)
+            {
+                bigint g = bigint_gcd(t, u);
+                if (g > 1)
+                    out.push_back(g);
+            }
+    }
+    std::sort(out.begin(), out.end());
+    return out;
+}
+
 } // namespace detail
 
 /**
@@ -214,6 +299,20 @@ struct AbstractManifold
     virtual homology::HomologyGroup homology(int k) const = 0;
     virtual homotopy::HomotopyGroup homotopy(int k) const = 0;
     virtual homology::HomologyGroup de_rham(int k) const = 0;
+    /**
+     * @brief Triangulation for simplicial consumers.
+     *
+     * CONTRACT (honesty audit): this MUST either be homology-faithful
+     * (betti_numbers() of the result equals homology() in every degree,
+     * torsion included) or be a documented placeholder. Placeholder
+     * implementations (Lens p>1, genus≥2 skeleta, large projective spaces,
+     * T^d d>2 bouquets, ConnectedSum left-projection) return geometrically
+     * suggestive complexes whose homology is NOT the manifold's — consumers
+     * must treat simplicial agreement as no evidence (see
+     * is_homotopy_equivalent's homology-first ordering) and consult
+     * homology()/homotopy() as authoritative. The simplicial-vs-authoritative
+     * cross-check test pins which manifolds are faithful.
+     */
     virtual homology::SimplicialComplex to_simplicial() const = 0;
     virtual int euler_characteristic() const = 0;
 
@@ -254,6 +353,14 @@ struct AbstractManifold
     virtual bool is_normal() const
     {
         return true;
+    }
+    virtual bool has_boundary() const
+    {
+        return false;
+    }
+    NP_NODISCARD virtual bool is_closed() const
+    {
+        return is_compact() && !has_boundary();
     }
 
     struct ConsistencyReport
@@ -341,8 +448,8 @@ struct AbstractManifold
         }
         r.checks.push_back("de Rham = singular (Betti match, torsion killed)");
 
-        // Poincaré duality for closed orientable
-        if (is_compact() && is_connected() && orient && !is_simply_connected() == false)
+        // Poincaré duality for closed (compact, no boundary) orientable
+        if (is_compact() && !has_boundary() && is_connected() && orient)
         {
             // Only enforce when orientable closed; check Betti symmetry
             bool pd_ok = true;
@@ -420,6 +527,34 @@ struct AbstractManifold
         return sec;
     }
 
+    /**
+     * @brief Sectional curvature K(e_i,e_j) for the coordinate frame.
+     * Defaults to R_{ijij} from `riemann_tensor`; override for known
+     * constant-curvature spaces.
+     */
+    NP_NODISCARD virtual double sectional_curvature(const differential::Point &p, int i, int j) const
+    {
+        auto R = riemann_tensor(p);
+        if (i < 0 || j < 0 || i >= dimension() || j >= dimension())
+            throw std::out_of_range("sectional_curvature: plane index out of range");
+        return R(i, j, i, j);
+    }
+
+    /**
+     * @brief Scalar curvature (trace of Ricci). Defaults to the trace of
+     * sectional curvatures, exact for constant-curvature spaces.
+     */
+    NP_NODISCARD virtual double scalar_curvature(const differential::Point &p) const
+    {
+        const int n = dimension();
+        double s = 0.0;
+        for (int i = 0; i < n; ++i)
+            for (int j = 0; j < n; ++j)
+                if (i != j)
+                    s += sectional_curvature(p, i, j);
+        return s;
+    }
+
     virtual bool is_einstein() const
     {
         return false;
@@ -466,6 +601,10 @@ struct SphereManifold : AbstractManifold
     {
         return true;
     }
+    bool is_connected() const override
+    {
+        return n >= 1; // S^0 is two points, hence disconnected
+    }
     bool is_simply_connected() const override
     {
         return n >= 2;
@@ -477,14 +616,18 @@ struct SphereManifold : AbstractManifold
 
     std::vector<homology::HomologyGroup> homology() const override
     {
+        if (n == 0)
+        {
+            // S^0 is two points: H_0 = Z^2, Euler 2. This matches
+            // `to_simplicial()` (two vertices) and `euler_characteristic()`.
+            return std::vector<homology::HomologyGroup>{{2, {}}};
+        }
         std::vector<homology::HomologyGroup> out(n + 1);
         for (int k = 0; k <= n; ++k)
         {
             if (k == 0 || k == n)
                 out[k].betti = 1;
         }
-        // S^0 is two points (betti 2) but keep historic betti 1 for backward compat
-        // with existing tests; authoritative simplicial has 2 components.
         return out;
     }
     homology::HomologyGroup homology(int k) const override
@@ -492,7 +635,10 @@ struct SphereManifold : AbstractManifold
         if (k < 0 || k > n)
             return homology::HomologyGroup{0, {}};
         homology::HomologyGroup g;
-        g.betti = (k == 0 || k == n) ? 1 : 0;
+        if (n == 0)
+            g.betti = (k == 0) ? 2 : 0;
+        else
+            g.betti = (k == 0 || k == n) ? 1 : 0;
         return g;
     }
     homotopy::HomotopyGroup homotopy(int k) const override
@@ -500,7 +646,7 @@ struct SphereManifold : AbstractManifold
         if (k <= 0)
             return {0, {}, true};
         if (n == 0)
-            return {0, {}, true};
+            return {0, {}, false}; // two points: all higher homotopy vanishes
         if (k < n)
             return {0, {}, false};
         if (k == n)
@@ -512,7 +658,10 @@ struct SphereManifold : AbstractManifold
     homology::HomologyGroup de_rham(int k) const override
     {
         homology::HomologyGroup g;
-        g.betti = (k == 0 || k == n) ? 1 : 0;
+        if (n == 0)
+            g.betti = (k == 0) ? 2 : 0; // H^0 = R^{#components}
+        else
+            g.betti = (k == 0 || k == n) ? 1 : 0;
         return g;
     }
     homology::SimplicialComplex to_simplicial() const override
@@ -559,16 +708,23 @@ struct SphereManifold : AbstractManifold
     {
         return n == 2;
     }
+    NP_NODISCARD double sectional_curvature(const differential::Point & /*p*/, int i, int j) const override
+    {
+        if (i == j || n < 2)
+            return 0.0;
+        return 1.0; // round unit sphere has constant curvature 1
+    }
+    NP_NODISCARD double scalar_curvature(const differential::Point & /*p*/) const override
+    {
+        return static_cast<double>(n) * static_cast<double>(n - 1);
+    }
     double volume() const override
     {
-        // Vol(S^n) = 2 pi^{(n+1)/2} / Gamma((n+1)/2)
-        if (n == 0)
-            return 2.0;
-        if (n == 1)
-            return 2 * 3.141592653589793;
-        if (n == 2)
-            return 4 * 3.141592653589793;
-        return 0.0;
+        // Vol(S^n) = 2 pi^{(n+1)/2} / Gamma((n+1)/2), radius 1.
+        if (n < 0)
+            return 0.0;
+        const double a = (static_cast<double>(n) + 1.0) / 2.0;
+        return 2.0 * std::pow(std::numbers::pi, a) / std::tgamma(a);
     }
 };
 using SphereVariety = SphereManifold;
@@ -698,6 +854,22 @@ struct TorusManifold : AbstractManifold
     RiemannTensor riemann_tensor(const differential::Point & /*p*/) const override
     {
         return RiemannTensor(dim, 0.0);
+    }
+    NP_NODISCARD double sectional_curvature(const differential::Point & /*p*/, int /*i*/, int /*j*/) const override
+    {
+        return 0.0; // flat
+    }
+    NP_NODISCARD double scalar_curvature(const differential::Point & /*p*/) const override
+    {
+        return 0.0; // flat
+    }
+    double volume() const override
+    {
+        // Flat unit torus (S^1)^dim with unit circles: (2*pi)^dim.
+        double v = 1.0;
+        for (int i = 0; i < dim; ++i)
+            v *= 2.0 * std::numbers::pi;
+        return v;
     }
 };
 using TorusVariety = TorusManifold;
@@ -912,6 +1084,387 @@ struct KleinBottleManifold : AbstractManifold
     }
 };
 
+// ── Euclidean space ─────────────────────────────────────────────────────
+
+struct EuclideanManifold : AbstractManifold
+{
+    int dim = 3;
+    explicit EuclideanManifold(int d = 3) : dim(d)
+    {
+        if (d < 0)
+            throw std::invalid_argument("EuclideanManifold: dimension must be >= 0");
+    }
+    std::string name() const override
+    {
+        return "R^" + std::to_string(dim);
+    }
+    int dimension() const override
+    {
+        return dim;
+    }
+    bool is_orientable() const override
+    {
+        return true;
+    }
+    bool is_compact() const override
+    {
+        return false;
+    }
+    bool is_connected() const override
+    {
+        return true;
+    }
+    bool is_simply_connected() const override
+    {
+        return true; // contractible
+    }
+    bool is_complete() const override
+    {
+        return true; // complete, non-compact (Hopf–Rinow)
+    }
+    bool is_parallelizable() const override
+    {
+        return true;
+    }
+    bool is_einstein() const override
+    {
+        return true; // flat
+    }
+    bool is_kahler() const override
+    {
+        return dim % 2 == 0; // C^{dim/2} with the standard structure
+    }
+    std::vector<homology::HomologyGroup> homology() const override
+    {
+        // Contractible: H_0 = Z, all higher vanish.
+        std::vector<homology::HomologyGroup> out(dim + 1);
+        if (dim >= 0)
+            out[0].betti = 1;
+        return out;
+    }
+    homology::HomologyGroup homology(int k) const override
+    {
+        homology::HomologyGroup g;
+        if (k == 0)
+            g.betti = 1;
+        return g;
+    }
+    homotopy::HomotopyGroup homotopy(int k) const override
+    {
+        if (k <= 0)
+            return {0, {}, true};
+        return {0, {}, false}; // contractible: all higher homotopy vanishes
+    }
+    homology::HomologyGroup de_rham(int k) const override
+    {
+        // Poincaré lemma: H^0 = R, all higher vanish.
+        homology::HomologyGroup g;
+        if (k == 0)
+            g.betti = 1;
+        return g;
+    }
+    homology::SimplicialComplex to_simplicial() const override
+    {
+        // Homotopy equivalent (deformation retract) to a point.
+        return homology::SimplicialComplex{{{{0}}, {}, {}}};
+    }
+    int euler_characteristic() const override
+    {
+        return 1;
+    }
+    RiemannTensor riemann_tensor(const differential::Point & /*p*/) const override
+    {
+        return RiemannTensor(dim, 0.0);
+    }
+    double volume() const override
+    {
+        return std::numeric_limits<double>::infinity();
+    }
+};
+using EuclideanVariety = EuclideanManifold;
+
+// ── Closed orientable surface of genus g ────────────────────────────────
+
+struct GenusGSurfaceManifold : AbstractManifold
+{
+    int g = 1;
+    explicit GenusGSurfaceManifold(int genus = 1) : g(genus)
+    {
+        if (genus < 0)
+            throw std::invalid_argument("GenusGSurfaceManifold: genus must be >= 0");
+    }
+    std::string name() const override
+    {
+        return "Sigma_" + std::to_string(g);
+    }
+    int dimension() const override
+    {
+        return 2;
+    }
+    bool is_orientable() const override
+    {
+        return true;
+    }
+    bool is_compact() const override
+    {
+        return true;
+    }
+    bool is_simply_connected() const override
+    {
+        return g == 0;
+    }
+    bool is_parallelizable() const override
+    {
+        return g == 1; // only T^2 among closed orientable surfaces
+    }
+    bool is_einstein() const override
+    {
+        return true; // every surface admits a constant-curvature (Einstein) metric
+    }
+    bool is_kahler() const override
+    {
+        return true; // every closed orientable surface admits a complex structure
+    }
+    std::vector<homology::HomologyGroup> homology() const override
+    {
+        std::vector<homology::HomologyGroup> out(3);
+        out[0].betti = 1;
+        out[1].betti = 2 * g;
+        out[2].betti = 1;
+        return out;
+    }
+    homology::HomologyGroup homology(int k) const override
+    {
+        homology::HomologyGroup h;
+        if (k == 0 || k == 2)
+            h.betti = 1;
+        else if (k == 1)
+            h.betti = 2 * g;
+        return h;
+    }
+    homotopy::HomotopyGroup homotopy(int k) const override
+    {
+        if (k <= 0)
+            return {0, {}, true};
+        if (g == 0)
+        {
+            // S^2: pi_1 = 0, pi_2 = Z, higher inconclusive.
+            if (k == 1)
+                return {0, {}, false};
+            if (k == 2)
+                return {1, {}, false};
+            return {0, {}, true};
+        }
+        // Genus >= 1 surfaces are aspherical K(pi,1): higher pi_k vanish.
+        // pi_1 itself is non-abelian for g >= 2; rank reported is the
+        // abelianization H_1 = Z^{2g}.
+        if (k == 1)
+            return {2 * g, {}, false};
+        return {0, {}, false};
+    }
+    homology::HomologyGroup de_rham(int k) const override
+    {
+        return homology(k); // torsion-free
+    }
+    homology::SimplicialComplex to_simplicial() const override
+    {
+        if (g == 0)
+            return homology::sphere_tetrahedron();
+        if (g == 1)
+            return TorusManifold(2).to_simplicial();
+        // Genus >= 2: return the 1-skeleton (wedge of 2g circles), which is
+        // H_1/pi_1-faithful. Closing the surface needs a 2-cell along the
+        // product of commutators, not a single simplex; homology() and
+        // euler_characteristic() stay authoritative.
+        homology::SimplicialComplexBuilder b;
+        for (int c = 0; c < 2 * g; ++c)
+        {
+            int a = 3 * c + 1;
+            int cc = 3 * c + 2;
+            b.add_simplex({0, a});
+            b.add_simplex({a, cc});
+            b.add_simplex({cc, 0});
+        }
+        return b.build();
+    }
+    int euler_characteristic() const override
+    {
+        return 2 - 2 * g;
+    }
+    RiemannTensor riemann_tensor(const differential::Point & /*p*/) const override
+    {
+        // Constant curvature K = +1 (g=0), 0 (g=1), -1 (g>=2) model metric.
+        RiemannTensor R(2, 0.0);
+        const double K = (g == 0) ? 1.0 : (g == 1 ? 0.0 : -1.0);
+        for (int i = 0; i < 2; ++i)
+            for (int j = 0; j < 2; ++j)
+                for (int k = 0; k < 2; ++k)
+                    for (int l = 0; l < 2; ++l)
+                    {
+                        double gik = (i == k) ? 1.0 : 0.0;
+                        double gjl = (j == l) ? 1.0 : 0.0;
+                        double gil = (i == l) ? 1.0 : 0.0;
+                        double gjk = (j == k) ? 1.0 : 0.0;
+                        R(i, j, k, l) = K * (gik * gjl - gil * gjk);
+                    }
+        return R;
+    }
+    NP_NODISCARD double sectional_curvature(const differential::Point & /*p*/, int i, int j) const override
+    {
+        if (i == j)
+            return 0.0;
+        return (g == 0) ? 1.0 : (g == 1 ? 0.0 : -1.0);
+    }
+    NP_NODISCARD double scalar_curvature(const differential::Point & /*p*/) const override
+    {
+        return 2.0 * ((g == 0) ? 1.0 : (g == 1 ? 0.0 : -1.0));
+    }
+    double volume() const override
+    {
+        // Gauss–Bonnet model volumes: unit sphere, unit flat torus, and
+        // hyperbolic (K=-1) area 4*pi*(g-1) for g >= 2.
+        if (g == 0)
+            return 4.0 * std::numbers::pi;
+        if (g == 1)
+            return 4.0 * std::numbers::pi * std::numbers::pi;
+        return 4.0 * std::numbers::pi * static_cast<double>(g - 1);
+    }
+};
+using GenusGSurfaceVariety = GenusGSurfaceManifold;
+
+// ── Lens space L(p;q) ───────────────────────────────────────────────────
+
+struct LensSpaceManifold : AbstractManifold
+{
+    int p = 2;
+    int q = 1;
+    LensSpaceManifold(int pp = 2, int qq = 1) : p(pp), q(qq)
+    {
+        if (p < 1)
+            throw std::invalid_argument("LensSpaceManifold: p must be >= 1");
+        if (p > 1)
+        {
+            q %= p;
+            if (q < 0)
+                q += p;
+            if (detail::bigint_gcd(bigint(p), bigint(q)) != 1)
+                throw std::invalid_argument("LensSpaceManifold: q must be coprime to p");
+        }
+        else
+        {
+            q = 0; // L(1;_) is S^3 regardless of q
+        }
+    }
+    std::string name() const override
+    {
+        return "L(" + std::to_string(p) + ";" + std::to_string(q) + ")";
+    }
+    int dimension() const override
+    {
+        return 3;
+    }
+    bool is_orientable() const override
+    {
+        return true;
+    }
+    bool is_compact() const override
+    {
+        return true;
+    }
+    bool is_simply_connected() const override
+    {
+        return p == 1;
+    }
+    bool is_parallelizable() const override
+    {
+        return true; // every closed orientable 3-manifold is parallelizable
+    }
+    bool is_einstein() const override
+    {
+        return true; // spherical space form, constant curvature +1
+    }
+    std::vector<homology::HomologyGroup> homology() const override
+    {
+        // H = [Z, Z/p (p>1), 0, Z].
+        std::vector<homology::HomologyGroup> out(4);
+        out[0].betti = 1;
+        if (p > 1)
+            out[1].torsion = {bigint(p)};
+        out[3].betti = 1;
+        return out;
+    }
+    homology::HomologyGroup homology(int k) const override
+    {
+        homology::HomologyGroup h;
+        if (k == 0 || k == 3)
+            h.betti = 1;
+        else if (k == 1 && p > 1)
+            h.torsion = {bigint(p)};
+        return h;
+    }
+    homotopy::HomotopyGroup homotopy(int k) const override
+    {
+        if (k <= 0)
+            return {0, {}, true};
+        if (k == 1)
+        {
+            if (p == 1)
+                return {0, {}, false};
+            return {0, {bigint(p)}, false};
+        }
+        // Universal cover is S^3: covering induces pi_{>=2}(L) = pi_{>=2}(S^3),
+        // so pi_2 = 0 and pi_3 = Z conclusively.
+        if (k == 2)
+            return {0, {}, false};
+        if (k == 3)
+            return {1, {}, false};
+        return {0, {}, true};
+    }
+    homology::HomologyGroup de_rham(int k) const override
+    {
+        // Torsion killed over R: [R, 0, 0, R].
+        homology::HomologyGroup h;
+        if (k == 0 || k == 3)
+            h.betti = 1;
+        return h;
+    }
+    homology::SimplicialComplex to_simplicial() const override
+    {
+        if (p == 1)
+            return detail::sphere_boundary_complex(3);
+        // Faithful lens triangulations need many vertices (linear in p);
+        // homology()/homotopy() stay authoritative for p > 1.
+        return detail::sphere_boundary_complex(3);
+    }
+    int euler_characteristic() const override
+    {
+        return 0;
+    }
+    RiemannTensor riemann_tensor(const differential::Point & /*p*/) const override
+    {
+        // Locally isometric to the unit 3-sphere: constant curvature +1.
+        RiemannTensor R(3, 0.0);
+        for (int i = 0; i < 3; ++i)
+            for (int j = 0; j < 3; ++j)
+                for (int k = 0; k < 3; ++k)
+                    for (int l = 0; l < 3; ++l)
+                    {
+                        double gik = (i == k) ? 1.0 : 0.0;
+                        double gjl = (j == l) ? 1.0 : 0.0;
+                        double gil = (i == l) ? 1.0 : 0.0;
+                        double gjk = (j == k) ? 1.0 : 0.0;
+                        R(i, j, k, l) = gik * gjl - gil * gjk;
+                    }
+        return R;
+    }
+    double volume() const override
+    {
+        // Vol(S^3)/p with the round metric, Vol(S^3) = 2*pi^2.
+        return 2.0 * std::numbers::pi * std::numbers::pi / static_cast<double>(p);
+    }
+};
+using LensSpaceVariety = LensSpaceManifold;
+
 // ── Product ─────────────────────────────────────────────────────────────
 
 struct ProductManifold : AbstractManifold
@@ -968,32 +1521,27 @@ struct ProductManifold : AbstractManifold
     }
     std::vector<homology::HomologyGroup> homology() const override
     {
-        // Künneth over Z: Betti convolution, torsion via Tor (we approximate
-        // Betti via product formula for field coefficients; torsion reported
-        // conservatively as empty for product of torsion-free factors).
+        // Künneth over Z: Betti numbers convolve (field coefficients), and
+        // torsion follows from H_p⊗H_q ⊕ Tor(H_p,H_q) degree by degree.
         int D = dimension();
-        std::vector<int> betti(D + 1, 0);
-        betti[0] = 1;
+        std::vector<homology::HomologyGroup> cur(1);
+        cur[0].betti = 1;
         int cur_dim = 0;
-        std::vector<int> cur_betti = {1};
         for (auto &f : factors)
         {
             auto hf = f->homology();
             int df = f->dimension();
-            std::vector<int> next(cur_dim + df + 1, 0);
+            std::vector<homology::HomologyGroup> next(cur_dim + df + 1);
             for (int i = 0; i <= cur_dim; ++i)
                 for (int j = 0; j <= df && j < static_cast<int>(hf.size()); ++j)
-                    next[i + j] += cur_betti[i] * hf[j].betti;
-            cur_betti = next;
+                    next[i + j].betti += cur[i].betti * hf[j].betti;
+            for (int n = 0; n <= cur_dim + df; ++n)
+                next[n].torsion = detail::kunneth_product_torsion(cur, hf, n);
+            cur = std::move(next);
             cur_dim += df;
         }
-        betti = cur_betti;
-        std::vector<homology::HomologyGroup> out(D + 1);
-        for (int k = 0; k <= D; ++k)
-            out[k].betti = betti[k];
-        // Torsion: if any factor has torsion, product may have torsion via Tor;
-        // mark Tor contributions as Z/2 where both factors have even torsion for demo.
-        return out;
+        cur.resize(D + 1);
+        return cur;
     }
     homology::HomologyGroup homology(int k) const override
     {
@@ -1022,8 +1570,10 @@ struct ProductManifold : AbstractManifold
     }
     homology::HomologyGroup de_rham(int k) const override
     {
-        // Künneth over R: same convolution as Betti
-        return homology(k);
+        // Künneth over R: same Betti convolution, torsion killed.
+        auto h = homology(k);
+        h.torsion.clear();
+        return h;
     }
     homology::SimplicialComplex to_simplicial() const override
     {
@@ -1031,9 +1581,22 @@ struct ProductManifold : AbstractManifold
             return homology::SimplicialComplex{{{{0}}, {}, {}}};
         if (factors.size() == 1)
             return factors[0]->to_simplicial();
-        // For two factors, wedge-like placeholder; full product triangulation
-        // is non-trivial (staircase). Return first factor's complex; homology()
-        // remains authoritative.
+        if (factors.size() == 2)
+        {
+            const int d0 = factors[0]->dimension();
+            const int d1 = factors[1]->dimension();
+            // Point factor: product is the other factor.
+            if (d0 == 0 && factors[0]->euler_characteristic() == 1)
+                return factors[1]->to_simplicial();
+            if (d1 == 0 && factors[1]->euler_characteristic() == 1)
+                return factors[0]->to_simplicial();
+            // S^1 x S^1 is T^2: use the faithful 9-vertex triangulation.
+            if (d0 == 1 && d1 == 1)
+                return TorusManifold(2).to_simplicial();
+        }
+        // Full product triangulation (staircase subdivision) is non-trivial;
+        // homology() stays authoritative and simplicial output is a
+        // homology-faithful placeholder only for the cases above.
         return factors[0]->to_simplicial();
     }
     int euler_characteristic() const override
@@ -1132,7 +1695,10 @@ struct WedgeManifold : AbstractManifold
     }
     homology::HomologyGroup de_rham(int k) const override
     {
-        return homology(k);
+        // Over R torsion is killed; Betti numbers add under wedges.
+        auto h = homology(k);
+        h.torsion.clear();
+        return h;
     }
     homology::SimplicialComplex to_simplicial() const override
     {
@@ -1156,6 +1722,121 @@ struct WedgeManifold : AbstractManifold
     }
 };
 using WedgeVariety = WedgeManifold;
+
+// ── Connected sum ───────────────────────────────────────────────────────
+
+struct ConnectedSumManifold : AbstractManifold
+{
+    std::unique_ptr<AbstractManifold> left;
+    std::unique_ptr<AbstractManifold> right;
+    ConnectedSumManifold(std::unique_ptr<AbstractManifold> a, std::unique_ptr<AbstractManifold> b)
+        : left(std::move(a)), right(std::move(b))
+    {
+        if (!left || !right)
+            throw std::invalid_argument("ConnectedSumManifold: summands must be non-null");
+        if (left->dimension() != right->dimension())
+            throw std::invalid_argument("ConnectedSumManifold: summands must have equal dimension");
+        if (left->dimension() < 2)
+            throw std::invalid_argument("ConnectedSumManifold: dimension must be >= 2");
+    }
+    std::string name() const override
+    {
+        return left->name() + " # " + right->name();
+    }
+    int dimension() const override
+    {
+        return left->dimension();
+    }
+    bool is_orientable() const override
+    {
+        return left->is_orientable() && right->is_orientable();
+    }
+    bool is_compact() const override
+    {
+        return left->is_compact() && right->is_compact();
+    }
+    bool is_connected() const override
+    {
+        return left->is_connected() && right->is_connected();
+    }
+    bool is_simply_connected() const override
+    {
+        // Codimension >= 3 (dim >= 3): Van Kampen gives pi_1 free product;
+        // both simply connected implies the sum is. For surfaces both
+        // simply connected forces both S^2, whose sum is S^2.
+        return left->is_simply_connected() && right->is_simply_connected();
+    }
+    std::vector<homology::HomologyGroup> homology() const override
+    {
+        const int n = dimension();
+        auto hl = left->homology();
+        auto hr = right->homology();
+        std::vector<homology::HomologyGroup> out(n + 1);
+        out[0].betti = 1;
+        for (int k = 1; k < n; ++k)
+        {
+            int bl = (k < static_cast<int>(hl.size())) ? hl[k].betti : 0;
+            int br = (k < static_cast<int>(hr.size())) ? hr[k].betti : 0;
+            out[k].betti = bl + br;
+            if (k < static_cast<int>(hl.size()))
+                out[k].torsion.insert(out[k].torsion.end(), hl[k].torsion.begin(), hl[k].torsion.end());
+            if (k < static_cast<int>(hr.size()))
+                out[k].torsion.insert(out[k].torsion.end(), hr[k].torsion.begin(), hr[k].torsion.end());
+            std::sort(out[k].torsion.begin(), out[k].torsion.end());
+        }
+        // Closed connected sum: H_n = Z iff orientable, else 0.
+        if (is_compact() && is_connected() && is_orientable())
+            out[n].betti = 1;
+        return out;
+    }
+    homology::HomologyGroup homology(int k) const override
+    {
+        auto h = homology();
+        if (k < 0 || k >= static_cast<int>(h.size()))
+            return {0, {}};
+        return h[k];
+    }
+    homotopy::HomotopyGroup homotopy(int k) const override
+    {
+        if (k <= 0)
+            return {0, {}, true};
+        if (k == 1)
+        {
+            // Van Kampen: pi_1 is the free product; rank/torsion reported
+            // is its abelianization H_1 = H_1(left) + H_1(right).
+            auto gl = left->homotopy(1);
+            auto gr = right->homotopy(1);
+            if (gl.inconclusive || gr.inconclusive)
+                return {0, {}, true};
+            std::vector<bigint> tors = gl.torsion;
+            tors.insert(tors.end(), gr.torsion.begin(), gr.torsion.end());
+            std::sort(tors.begin(), tors.end());
+            return {gl.rank + gr.rank, tors, false};
+        }
+        return {0, {}, true};
+    }
+    homology::HomologyGroup de_rham(int k) const override
+    {
+        // Over R torsion is killed; Betti numbers match singular homology.
+        auto h = homology(k);
+        h.torsion.clear();
+        return h;
+    }
+    homology::SimplicialComplex to_simplicial() const override
+    {
+        // No generic simplicial connected-sum construction; homology()
+        // stays authoritative.
+        return left->to_simplicial();
+    }
+    int euler_characteristic() const override
+    {
+        // chi(M # N) = chi(M) + chi(N) - chi(S^n), chi(S^n) = 1 + (-1)^n.
+        const int n = dimension();
+        const int chi_sphere = 1 + ((n % 2 == 0) ? 1 : -1);
+        return left->euler_characteristic() + right->euler_characteristic() - chi_sphere;
+    }
+};
+using ConnectedSumVariety = ConnectedSumManifold;
 
 // ── Algebraic geometry helpers ─────────────────────────────────────────
 
@@ -1192,7 +1873,8 @@ struct AffineScheme
     {
         return static_cast<int>(equations.size()) <= ambient_dim;
     }
-    bool is_smooth() const
+    // Heuristic string match only (see body); Gröbner/Jacobian needed for real smoothness.
+    bool is_smooth_heuristic() const
     {
         for (auto &eq : equations)
         {
@@ -1210,7 +1892,8 @@ struct AffineScheme
         }
         return true;
     }
-    bool is_irreducible() const
+    // Heuristic string match only; see body.
+    bool is_irreducible_heuristic() const
     {
         // Heuristic: single quadric with constant term like x^2+y^2-1 is irreducible over k
         // (char !=2)
@@ -1224,11 +1907,13 @@ struct AffineScheme
         }
         return true;
     }
-    bool is_reduced() const
+    // Assumes reduced (no nilpotency check performed); kept for API shape.
+    bool is_reduced_heuristic() const
     {
         return true;
     }
-    bool is_empty() const
+    // Assumes non-empty; string equations are not solved.
+    bool is_empty_heuristic() const
     {
         return false;
     }
@@ -1249,7 +1934,8 @@ struct Sheaf
     {
         return is_locally_free && rank == 1;
     }
-    bool is_ample() const
+    // Name-based heuristic only (no Proj/improperness check).
+    bool is_ample_heuristic() const
     {
         return type.find("O_X(1)") != std::string::npos;
     }
@@ -1277,16 +1963,89 @@ NP_NODISCARD inline KleinBottleManifold make_klein_bottle()
 {
     return KleinBottleManifold{};
 }
+NP_NODISCARD inline EuclideanManifold make_euclidean(int d = 3)
+{
+    return EuclideanManifold(d);
+}
+NP_NODISCARD inline GenusGSurfaceManifold make_genus_g_surface(int g)
+{
+    return GenusGSurfaceManifold(g);
+}
+NP_NODISCARD inline LensSpaceManifold make_lens_space(int p, int q = 1)
+{
+    return LensSpaceManifold(p, q);
+}
 
-template <typename... Ms> NP_NODISCARD inline auto make_product(std::unique_ptr<Ms>... ms)
+template <typename T>
+concept ManifoldUniquePtr = std::derived_from<typename std::remove_cvref_t<T>::element_type, AbstractManifold>;
+
+template <typename... Ms>
+    requires(std::derived_from<Ms, AbstractManifold> && ...)
+NP_NODISCARD inline auto make_product(std::unique_ptr<Ms>... ms)
 {
     std::vector<std::unique_ptr<AbstractManifold>> v;
     (v.push_back(std::move(ms)), ...);
     return ProductManifold(std::move(v));
 }
 
-using AnyManifold = std::variant<SphereManifold, TorusManifold, ProjectiveManifold, KleinBottleManifold, WedgeManifold,
-                                 ProductManifold>;
+template <typename... Ms>
+    requires(std::derived_from<Ms, AbstractManifold> && ...)
+NP_NODISCARD inline auto make_wedge(std::unique_ptr<Ms>... ms)
+{
+    std::vector<std::unique_ptr<AbstractManifold>> v;
+    (v.push_back(std::move(ms)), ...);
+    return WedgeManifold(std::move(v));
+}
+
+template <typename A, typename B>
+    requires(std::derived_from<A, AbstractManifold> && std::derived_from<B, AbstractManifold>)
+NP_NODISCARD inline auto make_connected_sum(std::unique_ptr<A> a, std::unique_ptr<B> b)
+{
+    return ConnectedSumManifold(std::move(a), std::move(b));
+}
+
+// ── Pointer factories (mirror np::variety::*, return owned manifolds) ──
+
+NP_NODISCARD inline auto sphere(int n)
+{
+    return std::make_unique<SphereManifold>(n);
+}
+NP_NODISCARD inline auto torus(int d = 2)
+{
+    return std::make_unique<TorusManifold>(d);
+}
+NP_NODISCARD inline auto projective_space(std::string f, int n)
+{
+    return std::make_unique<ProjectiveManifold>(std::move(f), n);
+}
+NP_NODISCARD inline auto real_projective(int n)
+{
+    return std::make_unique<ProjectiveManifold>("R", n);
+}
+NP_NODISCARD inline auto complex_projective(int n)
+{
+    return std::make_unique<ProjectiveManifold>("C", n);
+}
+NP_NODISCARD inline auto klein_bottle()
+{
+    return std::make_unique<KleinBottleManifold>();
+}
+NP_NODISCARD inline auto euclidean(int d = 3)
+{
+    return std::make_unique<EuclideanManifold>(d);
+}
+NP_NODISCARD inline auto genus_g_surface(int g)
+{
+    return std::make_unique<GenusGSurfaceManifold>(g);
+}
+NP_NODISCARD inline auto lens_space(int p, int q = 1)
+{
+    return std::make_unique<LensSpaceManifold>(p, q);
+}
+
+using AnyManifold =
+    std::variant<SphereManifold, TorusManifold, ProjectiveManifold, KleinBottleManifold, EuclideanManifold,
+                 GenusGSurfaceManifold, LensSpaceManifold, WedgeManifold, ProductManifold, ConnectedSumManifold>;
 using AnyVariety = AnyManifold;
 
 NP_NODISCARD inline std::vector<homology::HomologyGroup> homology(const AnyManifold &v)
@@ -1342,6 +2101,10 @@ using ProjectiveVariety = manifold::ProjectiveManifold;
 using WedgeVariety = manifold::WedgeManifold;
 using KleinBottleVariety = manifold::KleinBottleManifold;
 using ProductVariety = manifold::ProductManifold;
+using EuclideanVariety = manifold::EuclideanManifold;
+using GenusGSurfaceVariety = manifold::GenusGSurfaceManifold;
+using LensSpaceVariety = manifold::LensSpaceManifold;
+using ConnectedSumVariety = manifold::ConnectedSumManifold;
 using AnyVariety = manifold::AnyManifold;
 inline auto sphere(int n)
 {
@@ -1374,6 +2137,18 @@ inline auto torus_ptr(int d = 2)
 inline auto klein_bottle()
 {
     return std::make_unique<manifold::KleinBottleManifold>();
+}
+inline auto euclidean(int d = 3)
+{
+    return std::make_unique<manifold::EuclideanManifold>(d);
+}
+inline auto genus_g_surface(int g)
+{
+    return std::make_unique<manifold::GenusGSurfaceManifold>(g);
+}
+inline auto lens_space(int p, int q = 1)
+{
+    return std::make_unique<manifold::LensSpaceManifold>(p, q);
 }
 } // namespace np::variety
 

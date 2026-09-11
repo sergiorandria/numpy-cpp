@@ -1,10 +1,10 @@
 /**
  * @file scalar_custom.hpp
- * @brief Internal scalar backend for the `_Np_dtype` storage-classifier
+ * @brief Internal scalar backend for the `dtype_storage` storage-classifier
  *        element types.
  *
  * Specializes `np::detail::fixed::scalar_traits<T>` for every
- * `_Np_dtype::_Np_StorageClassifier<D, ...>` instantiation: the classifier
+ * `dtype_storage::storage_classifier<D, ...>` instantiation: the classifier
  * stores its computation core (an arithmetic/string `value_type`) behind a
  * union, so `get` unwraps it, `make` re-wraps a computed result, and
  * `zero()/one()/truthy()` operate on the core. The array business logic
@@ -31,15 +31,15 @@
 namespace np::detail::fixed
 {
 
-// scalar_traits for the _Np_dtype storage classifiers
+// scalar_traits for the dtype_storage storage classifiers
 /**
  * @brief Numeric branch: the classifier holds a contiguous scalar core.
  *
  * @tparam D  A np::dtype enumeration value.
  */
-template <auto D> struct scalar_traits<_Np_dtype::_Np_StorageClassifier<D, false>>
+template <auto D> struct scalar_traits<dtype_storage::storage_classifier<D, false>>
 {
-    using classifier = _Np_dtype::_Np_StorageClassifier<D, false>;
+    using classifier = dtype_storage::storage_classifier<D, false>;
     static constexpr bool is_custom = true;
 
     /** @brief Numeric core that reductions and kernels compute in. */
@@ -72,9 +72,9 @@ template <auto D> struct scalar_traits<_Np_dtype::_Np_StorageClassifier<D, false
  *
  * @tparam T  A np::dtype enumeration value (`string_` / `unicode_`).
  */
-template <auto D> struct scalar_traits<_Np_dtype::_Np_StorageClassifier<D, true>>
+template <auto D> struct scalar_traits<dtype_storage::storage_classifier<D, true>>
 {
-    using classifier = _Np_dtype::_Np_StorageClassifier<D, true>;
+    using classifier = dtype_storage::storage_classifier<D, true>;
     static constexpr bool is_custom = true;
 
     /** @brief Text core that reductions and kernels compute in. */

@@ -630,44 +630,51 @@ struct GenericHardwareBackend : IPhotonicBackend
     }
     NP_NODISCARD ndarray<c128> execute(const ndarray<c128> &input) override
     {
-        std::shared_lock lock(mtx_);
-        if (!has_U_)
-            throw std::runtime_error("GenericHardwareBackend: no unitary programmed");
-        // power safety check
-        double pwr = 0;
-        for (auto v : input.data())
-            pwr += std::norm(v);
-        if (pwr * 1.0 > cfg_.max_input_power_mw * 10) // arbitrary scale: norm ~ power
+        // Check state under shared lock, then release before user callback (RAII, no manual unlock)
+        bool has_callback = false;
+        bool coherent = true;
+        ndarray<c128> programmed_copy;
         {
-            // warn but not throw; real hardware would attenuate
+            std::shared_lock lock(mtx_);
+            if (!has_U_)
+                throw std::runtime_error("GenericHardwareBackend: no unitary programmed");
+            double pwr = 0;
+            for (auto v : input.data())
+                pwr += std::norm(v);
+            if (pwr * 1.0 > cfg_.max_input_power_mw * 10)
+            {
+                // warn but not throw; real hardware would attenuate
+            }
+            has_callback = static_cast<bool>(cbs_.optical_execute);
+            coherent = cfg_.coherent_detection;
+            programmed_copy = programmed_U_;
         }
-        if (cbs_.optical_execute)
+        if (has_callback)
         {
-            // release shared lock before calling user code (may re-enter)
-            lock.unlock();
+            // call user code without holding lock (may re-enter)
             auto out = cbs_.optical_execute(input);
             if (static_cast<int>(out.size()) != static_cast<int>(input.size()))
                 throw std::runtime_error("hardware callback returned wrong size");
-            // coherent vs direct detection
-            if (!cfg_.coherent_detection)
+            if (!coherent)
             {
                 for (auto &v : out.data())
                     v = c128(std::norm(v), 0);
             }
             return out;
         }
-        // fallback to simulation
-        return SimBackend::apply_unitary(programmed_U_, input);
+        // fallback to simulation (uses copy taken under lock)
+        return SimBackend::apply_unitary(programmed_copy, input);
     }
     NP_NODISCARD ndarray<c128> execute(const ndarray<c128> &input, const ndarray<c128> &unitary) override
     {
         if (cbs_.optical_execute)
         {
-            // program then execute
-            std::unique_lock lock(mtx_);
-            programmed_U_ = unitary;
-            has_U_ = true;
-            lock.unlock();
+            // program then execute (RAII, no manual unlock)
+            {
+                std::unique_lock lock(mtx_);
+                programmed_U_ = unitary;
+                has_U_ = true;
+            }
             return execute(input);
         }
         return SimBackend::apply_unitary(unitary, input);
@@ -1007,26 +1014,38 @@ inline void NoisySimBackend::configure(const MachZehnderMesh &mesh)
 }
 inline void GenericHardwareBackend::configure(const MachZehnderMesh &mesh)
 {
-    std::unique_lock lock(mtx_);
-    programmed_U_ = mesh.unitary;
-    cfg_ = mesh.config;
-    cal_ = mesh.calibration;
-    has_U_ = true;
-    last_status_.connected = is_available();
-    last_status_.calibrated = true;
-    // push phases to hardware if callback present
-    if (cbs_.write_phases)
+    std::vector<double> thetas;
+    std::vector<double> phis;
+    bool do_write = false;
     {
-        auto thetas = mesh.thetas();
-        auto phis = mesh.phis();
-        // unlock before calling user code
-        lock.unlock();
-        cbs_.write_phases(thetas, phis);
-        lock.lock();
-        last_status_.fidelity = mesh.fidelity();
+        std::unique_lock lock(mtx_);
+        programmed_U_ = mesh.unitary;
+        cfg_ = mesh.config;
+        cal_ = mesh.calibration;
+        has_U_ = true;
+        last_status_.connected = is_available();
+        last_status_.calibrated = true;
+        if (cbs_.write_phases)
+        {
+            thetas = mesh.thetas();
+            phis = mesh.phis();
+            do_write = true;
+        }
+        if (!do_write)
+        {
+            last_status_.fidelity = mesh.fidelity();
+            last_status_.insertion_loss_db = mesh.insertion_loss_db();
+            return;
+        }
     }
-    // insertion loss
-    last_status_.insertion_loss_db = mesh.insertion_loss_db();
+    // call user code without holding lock (RAII, no manual unlock)
+    if (do_write)
+        cbs_.write_phases(thetas, phis);
+    {
+        std::unique_lock lock(mtx_);
+        last_status_.fidelity = mesh.fidelity();
+        last_status_.insertion_loss_db = mesh.insertion_loss_db();
+    }
 }
 
 // ── Optical FFT ────────────────────────────────────────────────────────

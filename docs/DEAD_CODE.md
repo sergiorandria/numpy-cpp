@@ -1,6 +1,6 @@
 #Dead Code Analysis — dev(isabelle + lattice + padic + global API)
 
-> Branch `dev` — `6856eca` + `35c2498` + `33ffadd` + `9563332` — `31/31 ctest` (including `test_lattice` + `test_padic`), `4/4` Isabelle `100%`.
+> Branch `dev` — `6856eca` + `35c2498` + `33ffadd` + `9563332` — `31/31 ctest` at the time of writing (now 49/49; including `test_lattice` + `test_padic`), `4/4` Isabelle `100%`.
 
 This document analyses **dead code** (defined but never used in tests or umbrella `np.hpp`)
 and how it is now **integrated** with the rest of the codebase, plus where the
@@ -57,7 +57,7 @@ Dead code is integrated via **Decorator / Adapter** and **Global API inclusion**
 
 ```bash
 isabelle build -D isabelle -v   # → 100% Dual/Differential/Lattice (7s)
-cmake --build build -j8 && ctest --output-on-failure  # → 31/31 (including test_lattice, test_padic)
+cmake --build build -j8 && ctest --output-on-failure  # → 49/49 (31/31 at the time of writing, including test_lattice, test_padic)
 clang-format -i include/np/*.hpp tests/*.cpp  # → clean
 ```
 

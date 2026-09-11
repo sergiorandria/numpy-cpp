@@ -1,6 +1,6 @@
 # Docs — dev branch
 
-This folder is the **rewritten documentation for `dev`** (header-only, 712 routines, 22/22 tests). `main`’s README is the stable user guide; here we document internals, micro-opts, and benchmarks introduced in `f7b2653..cf8f4a4`.
+This folder is the **rewritten documentation for `dev`** (header-only, 760+ routines, 49/49 tests). `main`’s README is the stable user guide; here we document internals, micro-opts, and benchmarks introduced in `f7b2653..cf8f4a4`.
 
 ## Index
 
@@ -8,7 +8,7 @@ This folder is the **rewritten documentation for `dev`** (header-only, 712 routi
 |-----|---------|---------------|
 | [Architecture](ARCHITECTURE.md) | Dual engines, views, strides, dtype, threadpool | `ndarray.hpp:3116`, `linalg.hpp:2669`, `threadpool.hpp:236` |
 | [Performance](PERFORMANCE.md) | `is_contiguous` fast, `copyto` memcpy, `isin` hash, blocked GEMM, week arithmetic, WASM/RVV | `datetime.hpp:99`, `logic.hpp:590`, `simd.hpp:983` |
-| [API](API.md) | Per-module table 26 groups, 712 routines, file:line | `np.hpp:13` umbrella |
+| [API](API.md) | Per-module table 36 groups, 760+ routines, file:line | `np.hpp:13` umbrella |
 | [Contributing](CONTRIBUTING.md) | Dev workflow, `feat(module):` commits, `clang-format`, `ctest` | `AGENTS.md`, `.clang-format` |
 
 Start with `../README.md` (dev quick start) → `ARCHITECTURE.md` → `PERFORMANCE.md` for the micro-opt story.
@@ -32,7 +32,7 @@ Start with `../README.md` (dev quick start) → `ARCHITECTURE.md` → `PERFORMAN
 | `SIMD` | SSE2/AVX/NEON | + WASM `v128` + RVV `__riscv_vsetvl` |
 | `Threadpool` | mutex `dq_` | Chase-Lev ring `top/bottom` CAS |
 
-All 22 tests still pass — micro-opts are `[[likely]]` guarded with fallback.
+All 49 tests still pass — micro-opts are `[[likely]]` guarded with fallback.
 
 ## How to read
 

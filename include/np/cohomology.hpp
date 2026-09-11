@@ -7,18 +7,20 @@
  *     `H^n ≅ Hom(H_n,Z) ⊕ Ext(H_{n-1},Z)` – `betti^n = betti_n`,
  *     `torsion^n = torsion_{n-1}`.
  *   - `cohomology_groups`, `betti_cohomology`, `euler via cohomology`
- *   - `CohomologyRing` – generators, relations, `cup` table for
- *     classical spaces (S^n, T^n, CP^n, RP^n mod 2). Generic fallback is
- *     zero cup product with `inconclusive=true`.
+ *   - `CohomologyRing` – cup table computed at cochain level over Q
+ *     (Alexander–Whitney), presentations for classical spaces
+ *     (S^n, T^n, CP^n); `inconclusive=true` with torsion, oversized
+ *     complexes, or multi-term products the int table cannot express.
+ *     Boundary-matrix-only input (`bms`) cannot support cup products
+ *     (front/back face incidence needs vertex labels) and stays inconclusive.
  *   - `cup_product(K,p,q, a,b)` → class index in `H^{p+q}`
  *   - `poincare_pairing`, `intersection_form` (closed oriented 2n-manifolds)
  *   - `kunneth_cohomology` and `universal_coefficients` helpers
  *   - `cohomology_ring_string`
  *
- * The cup product for arbitrary simplicial complexes requires simplicial
- * cochain Alexander–Whitney; we implement exact CW models for the
- * classical manifolds and a generic sparse cochain fallback (zero unless
- * `p=0` or `q=0`).
+ * The cup product for arbitrary simplicial complexes is computed at
+ * cochain level (Alexander–Whitney) over Q; presentations for the
+ * classical manifolds are kept as ring descriptions.
  *
  * Reference: Hatcher Ch.3, Bott–Tu, May *Concise*.
  *
@@ -28,6 +30,7 @@
 #define NP_COHOMOLOGY_HPP
 
 #include <algorithm>
+#include <limits>
 #include <map>
 #include <string>
 #include <vector>
@@ -35,6 +38,11 @@
 #include "api_macros.hpp"
 #include "bigint.hpp"
 #include "homology.hpp"
+
+// Cup-product tuning (macros, no magic numbers in logic).
+// Exact rational elimination above this many simplices degrades to an
+// inconclusive ring instead of risking coefficient blowup.
+#define NP_COHOMOLOGY_CUP_MAX_SIMPLEX 4096
 
 namespace np::cohomology
 {
@@ -193,146 +201,583 @@ NP_NODISCARD inline bool is_cp_pattern(const std::vector<homology::HomologyGroup
 
 } // namespace detail
 
+namespace detail
+{
+
+// ── Exact rationals (bigint numerator/denominator) for cochain algebra ──
+
+struct Frac
+{
+    bigint num{0};
+    bigint den{1};
+
+    Frac() = default;
+    Frac(int n) : num(n), den(1)
+    {
+    }
+    Frac(const bigint &n) : num(n), den(1)
+    {
+    }
+    Frac(const bigint &n, const bigint &d)
+    {
+        assign(n, d);
+    }
+    void assign(const bigint &n, const bigint &d)
+    {
+        if (d == 0)
+        {
+            throw std::invalid_argument("Frac: zero denominator");
+        }
+        bigint nn = n, dd = d;
+        if (dd < 0)
+        {
+            nn = -nn;
+            dd = -dd;
+        }
+        if (nn == 0)
+        {
+            num = 0;
+            den = 1;
+            return;
+        }
+        const bigint g = homology::bigint_gcd(nn, dd);
+        num = nn / g;
+        den = dd / g;
+    }
+    NP_NODISCARD bool is_zero() const noexcept
+    {
+        return num == 0;
+    }
+};
+
+NP_NODISCARD inline Frac operator+(const Frac &a, const Frac &b)
+{
+    return Frac(a.num * b.den + b.num * a.den, a.den * b.den);
+}
+NP_NODISCARD inline Frac operator-(const Frac &a, const Frac &b)
+{
+    return Frac(a.num * b.den - b.num * a.den, a.den * b.den);
+}
+NP_NODISCARD inline Frac operator-(const Frac &a)
+{
+    return Frac(-a.num, a.den);
+}
+NP_NODISCARD inline Frac operator*(const Frac &a, const Frac &b)
+{
+    return Frac(a.num * b.num, a.den * b.den);
+}
+NP_NODISCARD inline Frac operator/(const Frac &a, const Frac &b)
+{
+    if (b.num == 0)
+    {
+        throw std::invalid_argument("Frac: division by zero");
+    }
+    return Frac(a.num * b.den, a.den * b.num);
+}
+
+/// RREF in place over Q; returns pivot columns. Exact (no rounding).
+inline std::vector<int> rref(std::vector<std::vector<Frac>> &m)
+{
+    const int rows = static_cast<int>(m.size());
+    if (rows == 0)
+    {
+        return {};
+    }
+    const int cols = static_cast<int>(m[0].size());
+    std::vector<int> pivots;
+    int r = 0;
+    for (int c = 0; c < cols && r < rows; ++c)
+    {
+        int piv = -1;
+        for (int i = r; i < rows; ++i)
+        {
+            if (!m[i][c].is_zero())
+            {
+                piv = i;
+                break;
+            }
+        }
+        if (piv < 0)
+        {
+            continue;
+        }
+        std::swap(m[r], m[piv]);
+        const Frac inv(m[r][c].den, m[r][c].num); // 1/pivot; pivot is nonzero
+        for (int j = c; j < cols; ++j)
+        {
+            m[r][j] = m[r][j] * inv;
+        }
+        for (int i = 0; i < rows; ++i)
+        {
+            if (i != r && !m[i][c].is_zero())
+            {
+                const Frac f = m[i][c];
+                for (int j = c; j < cols; ++j)
+                {
+                    m[i][j] = m[i][j] - f * m[r][j];
+                }
+            }
+        }
+        pivots.push_back(c);
+        ++r;
+    }
+    return pivots;
+}
+
+/// Basis of ker(rows) over Q, one vector per free variable.
+/// ncols is the ambient dimension (needed when rows is empty: no
+/// constraints means the whole space, not the zero space).
+NP_NODISCARD inline std::vector<std::vector<Frac>> nullspace(std::vector<std::vector<Frac>> rows, int ncols)
+{
+    const int n = ncols;
+    if (n <= 0)
+    {
+        return {};
+    }
+    // Drop all-zero rows (no constraints).
+    std::vector<std::vector<Frac>> m;
+    for (auto &row : rows)
+    {
+        bool any = false;
+        for (auto &x : row)
+        {
+            if (!x.is_zero())
+            {
+                any = true;
+                break;
+            }
+        }
+        if (any)
+        {
+            m.push_back(row);
+        }
+    }
+    if (m.empty())
+    {
+        // Whole space: standard basis.
+        std::vector<std::vector<Frac>> out(n, std::vector<Frac>(n, Frac(0)));
+        for (int i = 0; i < n; ++i)
+        {
+            out[i][i] = Frac(1);
+        }
+        return out;
+    }
+    const auto pivots = rref(m);
+    std::vector<bool> is_pivot(n, false);
+    for (int p : pivots)
+    {
+        is_pivot[p] = true;
+    }
+    // Row index per pivot column.
+    std::vector<int> pivot_row(n, -1);
+    for (int i = 0; i < static_cast<int>(m.size()); ++i)
+    {
+        for (int c = 0; c < n; ++c)
+        {
+            if (!m[i][c].is_zero())
+            {
+                pivot_row[c] = i;
+                break;
+            }
+        }
+    }
+    std::vector<std::vector<Frac>> out;
+    for (int f = 0; f < n; ++f)
+    {
+        if (is_pivot[f])
+        {
+            continue;
+        }
+        std::vector<Frac> v(n, Frac(0));
+        v[f] = Frac(1);
+        for (int p = 0; p < n; ++p)
+        {
+            if (is_pivot[p])
+            {
+                v[p] = -m[pivot_row[p]][f];
+            }
+        }
+        out.push_back(std::move(v));
+    }
+    return out;
+}
+
+/// Basis of the column space of A (m×n): original columns at pivot positions.
+NP_NODISCARD inline std::vector<std::vector<Frac>> column_basis(const std::vector<std::vector<Frac>> &A)
+{
+    if (A.empty() || A[0].empty())
+    {
+        return {};
+    }
+    auto m = A;
+    const auto pivots = rref(m);
+    const int rows = static_cast<int>(A.size());
+    std::vector<std::vector<Frac>> out;
+    for (int p : pivots)
+    {
+        std::vector<Frac> col(rows);
+        for (int i = 0; i < rows; ++i)
+        {
+            col[i] = A[i][p];
+        }
+        out.push_back(std::move(col));
+    }
+    return out;
+}
+
+NP_NODISCARD inline std::size_t row_rank(std::vector<std::vector<Frac>> rows)
+{
+    if (rows.empty() || rows[0].empty())
+    {
+        return 0;
+    }
+    return rref(rows).size();
+}
+
+/**
+ * @brief Solve E·c = z over Q where E's columns are basis vectors.
+ * @return Coordinates c; throws std::logic_error if inconsistent
+ *         (cannot happen for cocycles of a genuine complex).
+ */
+NP_NODISCARD inline std::vector<Frac> solve_columns(const std::vector<std::vector<Frac>> &cols,
+                                                    const std::vector<Frac> &z)
+{
+    const std::size_t n = z.size();
+    const std::size_t t = cols.size();
+    std::vector<std::vector<Frac>> m(n, std::vector<Frac>(t + 1, Frac(0)));
+    for (std::size_t i = 0; i < n; ++i)
+    {
+        for (std::size_t j = 0; j < t; ++j)
+        {
+            m[i][j] = cols[j][i];
+        }
+        m[i][t] = z[i];
+    }
+    rref(m);
+    std::vector<Frac> c(t, Frac(0));
+    for (std::size_t i = 0; i < n; ++i)
+    {
+        int piv = -1;
+        for (std::size_t j = 0; j < t; ++j)
+        {
+            if (!m[i][j].is_zero())
+            {
+                piv = static_cast<int>(j);
+                break;
+            }
+        }
+        if (piv < 0)
+        {
+            if (!m[i][t].is_zero())
+            {
+                throw std::logic_error("solve_columns: inconsistent system (not a cocycle?)");
+            }
+            continue;
+        }
+        c[piv] = m[i][t];
+    }
+    return c;
+}
+
+// ── Rational cohomology with Alexander–Whitney cup product ──
+
+/// Cup data over Q: H-basis per degree + cup coordinates in the target basis.
+struct RationalCohomology
+{
+    int D = -1;
+    std::vector<int> betti;                                                    ///< Rational Betti per degree.
+    std::vector<std::vector<std::vector<Frac>>> hbasis;                        ///< hbasis[p][i]: i-th H^p rep.
+    std::vector<std::vector<std::vector<Frac>>> bbasis;                        ///< bbasis[p][j]: coboundary basis.
+    std::vector<std::vector<std::vector<std::vector<std::vector<Frac>>>>> cup; ///< cup[p][q][a][b]: coords.
+    bool ok = false;
+};
+
+/**
+ * @brief Cohomology over Q with cochain-level Alexander–Whitney cup product.
+ *
+ * Coboundary δ^p is the transpose of ∂_{p+1}; H^p = ker δ^p / im δ^{p-1}.
+ * (α⌣β)[v_0..v_{p+q}] = α[v_0..v_p]·β[v_p..v_{p+q}].
+ * Throws std::invalid_argument if the complex is not closed under faces.
+ */
+NP_NODISCARD inline RationalCohomology rational_cohomology(const homology::SimplicialComplex &K)
+{
+    RationalCohomology rc;
+    const int D = K.dim();
+    if (D < 0)
+    {
+        return rc;
+    }
+    rc.D = D;
+    std::vector<int> n(D + 1, 0);
+    std::vector<std::map<std::vector<int>, int>> index(D + 1);
+    for (int d = 0; d <= D; ++d)
+    {
+        n[d] = static_cast<int>(K.simplices[d].size());
+        for (int i = 0; i < n[d]; ++i)
+        {
+            index[d][K.simplices[d][i]] = i;
+        }
+    }
+    // Coboundary matrices: delta^p (n_{p+1} rows × n_p cols) = transpose of d_{p+1}.
+    std::vector<std::vector<std::vector<Frac>>> delta(D + 1);
+    for (int p = 0; p <= D; ++p)
+    {
+        if (p + 1 > D || n[p] == 0 || n[p + 1] == 0)
+        {
+            delta[p].clear();
+            continue;
+        }
+        const auto bm = K.boundary_matrix(p + 1); // n_p rows × n_{p+1} cols
+        delta[p].assign(n[p + 1], std::vector<Frac>(n[p], Frac(0)));
+        for (int i = 0; i < n[p]; ++i)
+        {
+            for (int j = 0; j < n[p + 1]; ++j)
+            {
+                const int v = bm(i, j);
+                if (v != 0)
+                {
+                    delta[p][j][i] = Frac(v);
+                }
+            }
+        }
+    }
+    rc.betti.assign(D + 1, 0);
+    rc.hbasis.assign(D + 1, {});
+    rc.bbasis.assign(D + 1, {});
+    for (int p = 0; p <= D; ++p)
+    {
+        if (n[p] == 0)
+        {
+            continue;
+        }
+        const auto ker = nullspace(delta[p], n[p]); // cocycle representatives
+        std::vector<std::vector<Frac>> img;
+        if (p > 0 && !delta[p - 1].empty())
+        {
+            img = column_basis(delta[p - 1]); // coboundaries (⊆ ker since δ²=0)
+        }
+        rc.bbasis[p] = img;
+        // Greedy complement: keep kernel vectors that add rank over img+kept.
+        std::vector<std::vector<Frac>> kept;
+        for (const auto &kv : ker)
+        {
+            auto trial = img;
+            trial.insert(trial.end(), kept.begin(), kept.end());
+            const std::size_t before = row_rank(trial);
+            trial.push_back(kv);
+            if (row_rank(trial) > before)
+            {
+                kept.push_back(kv);
+            }
+        }
+        rc.hbasis[p] = kept;
+        rc.betti[p] = static_cast<int>(kept.size());
+    }
+    // Alexander–Whitney cup products, reduced in the H^{p+q} basis.
+    rc.cup.assign(D + 1, {});
+    for (int p = 0; p <= D; ++p)
+    {
+        rc.cup[p].assign(D + 1, {});
+        for (int q = 0; q <= D; ++q)
+        {
+            const int r = p + q;
+            if (r > D || rc.hbasis[p].empty() || rc.hbasis[q].empty() || rc.betti[r] == 0)
+            {
+                continue;
+            }
+            const int bp = static_cast<int>(rc.hbasis[p].size());
+            const int bq = static_cast<int>(rc.hbasis[q].size());
+            rc.cup[p][q].assign(bp, {});
+            // Reduction basis: coboundaries + H representatives in degree r.
+            std::vector<std::vector<Frac>> red = rc.bbasis[r];
+            red.insert(red.end(), rc.hbasis[r].begin(), rc.hbasis[r].end());
+            const std::size_t nb = rc.bbasis[r].size();
+            for (int a = 0; a < bp; ++a)
+            {
+                rc.cup[p][q][a].assign(bq, {});
+                for (int b = 0; b < bq; ++b)
+                {
+                    std::vector<Frac> z(n[r], Frac(0));
+                    for (int s = 0; s < n[r]; ++s)
+                    {
+                        const auto &sig = K.simplices[r][s];
+                        std::vector<int> front(sig.begin(), sig.begin() + p + 1);
+                        std::vector<int> back(sig.begin() + p, sig.end());
+                        const auto itf = index[p].find(front);
+                        const auto itb = index[q].find(back);
+                        if (itf == index[p].end() || itb == index[q].end())
+                        {
+                            throw std::invalid_argument("rational_cohomology: complex not closed under faces");
+                        }
+                        z[s] = rc.hbasis[p][a][itf->second] * rc.hbasis[q][b][itb->second];
+                    }
+                    const auto coords = solve_columns(red, z);
+                    rc.cup[p][q][a][b].assign(coords.begin() + nb, coords.end());
+                }
+            }
+        }
+    }
+    rc.ok = true;
+    return rc;
+}
+
+} // namespace detail
+
 NP_NODISCARD inline CohomologyRing cohomology_ring(const homology::SimplicialComplex &K)
 {
     auto hg = homology::homology_groups(K);
     auto cg_vec = cohomology_groups(K);
     CohomologyRing R;
     R.groups = cg_vec;
-    int D = static_cast<int>(cg_vec.size()) - 1;
-    R.cup.assign(D + 1, {});
-    for (int p = 0; p <= D; ++p)
-        for (int q = 0; q <= D; ++q)
-        {
-            int r = p + q;
-            if (r > D)
-                continue;
-            int bp = (p <= D) ? cg_vec[p].betti : 0;
-            int bq = (q <= D) ? cg_vec[q].betti : 0;
-            int br = (r <= D) ? cg_vec[r].betti : 0;
-            if (bp == 0 || bq == 0 || br == 0)
-                continue;
-        }
-    // Initialize cup table with -1 (zero)
+    const int D = static_cast<int>(cg_vec.size()) - 1;
     R.cup.assign(D + 1, std::vector<std::vector<std::vector<int>>>(D + 1));
-    for (int p = 0; p <= D; ++p)
-        for (int q = 0; q <= D; ++q)
+    // Torsion defeats integral reading of the table (e.g. RP² has a²≠0 mod 2
+    // while the rational table is zero): flag inconclusive, table stays rational.
+    for (const auto &g : hg)
+    {
+        if (!g.torsion.empty())
         {
-            int r = p + q;
-            if (r < 0 || r > D)
-                continue;
-            int bp = cg_vec[p].betti;
-            int bq = cg_vec[q].betti;
-            if (bp == 0 || bq == 0)
-                continue;
-            R.cup[p].resize(D + 1);
+            R.inconclusive = true;
             break;
         }
-    // Properly allocate: cup[p][q] is bp x bq matrix -> index in H^{p+q}
-    R.cup.assign(D + 1, std::vector<std::vector<std::vector<int>>>(D + 1));
-    for (int p = 0; p <= D; ++p)
-        for (int q = 0; q <= D; ++q)
+    }
+    // Simplex-count guard: exact rational elimination is exponential in the
+    // worst case; above the cap degrade to an inconclusive ring, not garbage.
+    std::size_t total = 0;
+    for (int d = 0; d <= K.dim(); ++d)
+    {
+        total += K.num_simplices(d);
+    }
+    if (total <= static_cast<std::size_t>(NP_COHOMOLOGY_CUP_MAX_SIMPLEX))
+    {
+        const auto rc = detail::rational_cohomology(K);
+        for (int p = 0; p <= D; ++p)
         {
-            int r = p + q;
-            if (r > D || r < 0)
-                continue;
-            int bp = cg_vec[p].betti;
-            int bq = cg_vec[q].betti;
-            int br = cg_vec[r].betti;
-            if (bp == 0 || bq == 0)
-                continue;
-            R.cup[p][q].assign(bp, std::vector<int>(bq, -1));
-            if (br == 0)
-                continue;
-            // Fill for known rings
-            if (detail::is_torus_pattern(hg))
+            for (int q = 0; q <= D; ++q)
             {
-                // Exterior algebra: basis indexed by subsets, cup is wedge with sign.
-                // For our Betti numbers binomial, we model cup as: generator e_i in H^1,
-                // e_I cup e_J = 0 if I∩J≠∅ else sign * e_{I∪J}. For basis ordering
-                // lexicographic, the sign is (-1)^{#crossings}. We implement generic
-                // rule: if p==0 or q==0, cup is identity; if p+q==D and I∪J covers, non-zero.
-                // Simplified for test: T2 has H1 basis {a,b}, H2 = a⌣b.
-                if (p == 0 || q == 0)
+                const int r = p + q;
+                if (r < 0 || r > D)
                 {
-                    for (int a = 0; a < bp; ++a)
-                        for (int b = 0; b < bq; ++b)
-                            R.cup[p][q][a][b] = (p == 0 ? b : a) % br;
+                    continue;
                 }
-                else if (D == 2 && p == 1 && q == 1)
+                const int bp = cg_vec[p].betti;
+                const int bq = cg_vec[q].betti;
+                if (bp == 0 || bq == 0)
                 {
-                    // T2: a⌣a=0, b⌣b=0, a⌣b=1, b⌣a=-1 (over Z, sign matters; we return 0 for
-                    // opposite)
-                    R.cup[1][1][0][0] = -1;
-                    R.cup[1][1][1][1] = -1;
-                    R.cup[1][1][0][1] = 0;
-                    R.cup[1][1][1][0] = 0; // would be -0 with sign; keep 0 as alternative basis
-                    R.presentation = "Λ[a,b] (a^2=b^2=0, a⌣b = [T2])";
+                    continue;
                 }
-                else
+                R.cup[p][q].assign(bp, std::vector<int>(bq, -1));
+                if (r >= static_cast<int>(rc.cup.size()) || p >= static_cast<int>(rc.cup.size()) ||
+                    q >= static_cast<int>(rc.cup[p].size()))
                 {
-                    // Generic wedge: if disjoint, map to 0th element of H^{p+q}
-                    for (int a = 0; a < bp; ++a)
-                        for (int b = 0; b < bq; ++b)
-                            R.cup[p][q][a][b] = 0;
+                    continue;
                 }
-            }
-            else if (detail::is_sphere_pattern(hg))
-            {
-                int n = D;
-                if ((p == 0 && q == n) || (p == n && q == 0))
-                    R.cup[p][q][0][0] = 0;
-                else if (p == 0 || q == 0)
+                const auto &tab = rc.cup[p][q];
+                for (int a = 0; a < bp && a < static_cast<int>(tab.size()); ++a)
                 {
-                    for (int a = 0; a < bp; ++a)
-                        for (int b = 0; b < bq; ++b)
-                            R.cup[p][q][a][b] = 0;
-                }
-                if (n == D)
-                    R.presentation = "Z[x]/(x^2) |x|=" + std::to_string(n);
-            }
-            else
-            {
-                int ncp = 0;
-                if (detail::is_cp_pattern(hg, ncp))
-                {
-                    // CP^n: H^{2k}=Z·h^k, h^k ⌣ h^l = h^{k+l} if k+l≤n else 0
-                    if (p % 2 == 0 && q % 2 == 0)
+                    for (int b = 0; b < bq && b < static_cast<int>(tab[a].size()); ++b)
                     {
-                        int kp = p / 2, kq = q / 2, kr = r / 2;
-                        if (kp + kq == kr && kr <= ncp)
-                            R.cup[p][q][0][0] = 0;
+                        int first = -1;
+                        bool multi = false;
+                        for (int c = 0; c < static_cast<int>(tab[a][b].size()); ++c)
+                        {
+                            if (!tab[a][b][c].is_zero())
+                            {
+                                if (first < 0)
+                                {
+                                    first = c;
+                                }
+                                else
+                                {
+                                    multi = true;
+                                    break;
+                                }
+                            }
+                        }
+                        if (multi)
+                        {
+                            // Genuine combination: the int table cannot express it.
+                            R.cup[p][q][a][b] = -2;
+                            R.inconclusive = true;
+                        }
+                        else
+                        {
+                            R.cup[p][q][a][b] = first; // -1 when zero
+                        }
                     }
-                    R.presentation = "Z[h]/(h^" + std::to_string(ncp + 1) + ") |h|=2";
-                }
-                else
-                {
-                    R.inconclusive = true;
-                    // Zero cup for unknown (except unit)
-                    if (p == 0 || q == 0)
-                        for (int a = 0; a < bp; ++a)
-                            for (int b = 0; b < bq; ++b)
-                                R.cup[p][q][a][b] = 0;
                 }
             }
         }
-    if (R.presentation.empty() && !detail::is_torus_pattern(hg) && !detail::is_sphere_pattern(hg))
+    }
+    else
+    {
+        R.inconclusive = true;
+    }
+    // Presentations for the classical patterns (still true as ring descriptions).
+    if (detail::is_torus_pattern(hg))
+    {
+        R.presentation = "Λ[a,b] (exterior)";
+    }
+    else if (detail::is_sphere_pattern(hg))
+    {
+        R.presentation = "Z[x]/(x^2) |x|=" + std::to_string(detail::effective_dim(hg));
+    }
+    else
     {
         int ncp = 0;
         if (detail::is_cp_pattern(hg, ncp))
+        {
             R.presentation = "Z[h]/(h^" + std::to_string(ncp + 1) + ") |h|=2";
+        }
     }
     return R;
 }
 
+/**
+ * @brief Rank of the cup-product pairing H^p × H^q → H^{p+q} over Q.
+ *
+ * Basis-independent (unlike raw table indices): the rank of the set of
+ * coordinate vectors {a⌣b}. Returns 0 when any side vanishes, -1 when
+ * uncomputable (oversized complex).
+ */
+NP_NODISCARD inline int cup_pairing_rank(const homology::SimplicialComplex &K, int p, int q)
+{
+    const int D = K.dim();
+    if (p < 0 || q < 0 || p > D || q > D || p + q > D)
+    {
+        return 0;
+    }
+    std::size_t total = 0;
+    for (int d = 0; d <= D; ++d)
+    {
+        total += K.num_simplices(d);
+    }
+    if (total > static_cast<std::size_t>(NP_COHOMOLOGY_CUP_MAX_SIMPLEX))
+    {
+        return -1;
+    }
+    const auto rc = detail::rational_cohomology(K);
+    if (p >= static_cast<int>(rc.cup.size()) || q >= static_cast<int>(rc.cup[p].size()))
+    {
+        return 0;
+    }
+    std::vector<std::vector<detail::Frac>> vecs;
+    for (const auto &row : rc.cup[p][q])
+    {
+        for (const auto &coords : row)
+        {
+            vecs.push_back(coords);
+        }
+    }
+    return static_cast<int>(detail::row_rank(std::move(vecs)));
+}
+
 NP_NODISCARD inline CohomologyRing cohomology_ring(const std::vector<ndarray<int>> &bms)
 {
-    homology::SimplicialComplex K;
-    // Build dummy complex just to reuse hg path? Instead compute hg directly
+    // Boundary matrices alone cannot support cup products: the
+    // Alexander–Whitney formula needs front/back face incidence, i.e.
+    // vertex labels. This overload stays inconclusive by design.
     auto hg = homology::homology_groups(bms);
-    // Create a dummy K with same hg via building a wedge? Simpler: construct R from hg
-    // pattern Reuse generic logic by fabricating a minimal K is hard; just compute via hg
-    // pattern
     CohomologyRing R;
     std::vector<CohomologyGroup> cg(hg.size());
     for (size_t n = 0; n < hg.size(); ++n)
@@ -389,17 +834,75 @@ NP_NODISCARD inline int cup_product(const homology::SimplicialComplex &K, int p,
     return v;
 }
 
+namespace detail
+{
+// Cup-pairing block M_{ab} = <a⌣b,[M]> for fixed (p,q) with p+q=n, read off
+// rational_cohomology()'s Alexander–Whitney table. Returns empty 0×0 when
+// not exactly computable: missing cup data, non-integral coordinates (the
+// greedy H-basis need not be integral), or out-of-int-range entries.
+NP_NODISCARD inline ndarray<int> cup_pairing_block(const homology::SimplicialComplex &K, int n, int p, int q, int bp,
+                                                   int bq)
+{
+    const auto empty = ndarray<int>::from_data({0, 0}, std::vector<int>{});
+    RationalCohomology rc = rational_cohomology(K);
+    if (!rc.ok || n > rc.D || p > rc.D || q > rc.D)
+        return empty;
+    if (p >= static_cast<int>(rc.cup.size()) || q >= static_cast<int>(rc.cup[p].size()))
+        return empty;
+    if (static_cast<int>(rc.cup[p][q].size()) != bp)
+        return empty;
+    if (n >= static_cast<int>(rc.betti.size()) || rc.betti[n] != 1)
+        return empty;
+    std::vector<int> data(static_cast<std::size_t>(bp) * static_cast<std::size_t>(bq), 0);
+    for (int a = 0; a < bp; ++a)
+    {
+        if (static_cast<int>(rc.cup[p][q][a].size()) != bq)
+            return empty;
+        for (int b = 0; b < bq; ++b)
+        {
+            const std::vector<Frac> &coords = rc.cup[p][q][a][b];
+            if (coords.size() != 1)
+                return empty;
+            const Frac &c = coords[0];
+            if (!(c.den == bigint("1")))
+                return empty; // rational, non-integral basis choice
+            long long vll = 0;
+            try
+            {
+                vll = c.num.convert_to<long long>();
+            }
+            catch (...)
+            {
+                return empty;
+            }
+            if (vll > std::numeric_limits<int>::max() || vll < std::numeric_limits<int>::min() ||
+                !(c.num == bigint(std::to_string(vll))))
+                return empty;
+            data[static_cast<std::size_t>(a) * static_cast<std::size_t>(bq) + static_cast<std::size_t>(b)] =
+                static_cast<int>(vll);
+        }
+    }
+    return ndarray<int>::from_data({bp, bq}, std::move(data));
+}
+} // namespace detail
+
 /**
  * @brief Poincaré pairing `H^p × H^{n-p} → Z` via cup + cap fundamental class.
  * For closed oriented n-manifold, pairing is unimodular.
  * Returns matrix `M_{ab}=⟨a⌣b,[M]⟩` as `ndarray<int>` of size `betti_p × betti_{n-p}`.
+ *
+ * NOTE (honesty audit): an earlier revision returned a hardcoded diagonal-1
+ * matrix with no cup evaluation at all. Entries are now read off the real
+ * Alexander–Whitney cup table (see detail::cup_pairing_block). Returns an
+ * empty 0×0 array when the pairing is not computable exactly here.
  */
 NP_NODISCARD inline ndarray<int> poincare_pairing(const homology::SimplicialComplex &K)
 {
+    const auto empty = ndarray<int>::from_data({0, 0}, std::vector<int>{});
     auto hg = homology::homology_groups(K);
     int n = detail::effective_dim(hg);
     if (n < 0 || hg[n].betti != 1)
-        return ndarray<int>::from_data({0, 0}, std::vector<int>{});
+        return empty;
     // Try middle pairing first, fallback to H^0×H^n which is always 1×1 for closed
     // manifold
     int half = n / 2;
@@ -414,45 +917,37 @@ NP_NODISCARD inline ndarray<int> poincare_pairing(const homology::SimplicialComp
         bp = hg[p].betti;
         bq = hg[q].betti;
         if (bp == 0 || bq == 0)
-            return ndarray<int>::from_data({0, 0}, std::vector<int>{});
+            return empty;
     }
-    std::vector<int> data(bp * bq, 0);
-    for (int i = 0; i < std::min(bp, bq); ++i)
-        data[i * bq + i] = 1;
-    return ndarray<int>::from_data({bp, bq}, std::move(data));
+    return detail::cup_pairing_block(K, n, p, q, bp, bq);
 }
 
 /**
  * @brief Intersection form `Q: H_{n/2} × H_{n/2} → Z` for closed oriented 4k-manifold.
  * Returns `ndarray<int>` `b × b` where `b = betti_{2k}`.
+ *
+ * NOTE (honesty audit): an earlier revision hardcoded CP2 → [1], S2×S2 →
+ * [[0,1],[1,0]], and identity everywhere else, with no cup evaluation.
+ * This now reads the middle-dimensional cup block straight from
+ * rational_cohomology() (the intersection form IS the H^{2k}×H^{2k} cup
+ * pairing under Poincaré duality). Empty 0×0 when not exactly computable.
  */
 NP_NODISCARD inline ndarray<int> intersection_form(const homology::SimplicialComplex &K)
 {
+    const auto empty = ndarray<int>::from_data({0, 0}, std::vector<int>{});
     auto hg = homology::homology_groups(K);
     int n = detail::effective_dim(hg);
     if (n % 4 != 0)
-        return ndarray<int>::from_data({0, 0}, std::vector<int>{});
+        return empty;
     int mid = n / 2;
     int b = hg[mid].betti;
     if (b == 0)
-        return ndarray<int>::from_data({0, 0}, std::vector<int>{});
-    // For CP2, form is [1]; for S2×S2, [[0,1],[1,0]]; for K3, E8⊕E8⊕3H
-    // We detect patterns:
-    if (n == 4 && b == 1 && hg[2].betti == 1)
-    {
-        // CP2
-        return ndarray<int>::from_data({1, 1}, std::vector<int>{1});
-    }
-    if (n == 4 && b == 2)
-    {
-        // S2×S2
-        return ndarray<int>::from_data({2, 2}, std::vector<int>{0, 1, 1, 0});
-    }
-    // Generic unimodular symmetric: identity
-    std::vector<int> data(b * b, 0);
-    for (int i = 0; i < b; ++i)
-        data[i * b + i] = 1;
-    return ndarray<int>::from_data({b, b}, std::move(data));
+        return empty;
+    if (hg[n].betti != 1)
+        return empty;
+    // Middle-only: unlike poincare_pairing there is no (0,n) fallback — an
+    // H^0×H^n block is not the intersection form.
+    return detail::cup_pairing_block(K, n, mid, mid, b, b);
 }
 
 /**

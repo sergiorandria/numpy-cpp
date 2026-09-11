@@ -6,18 +6,18 @@ Build: `cmake -S . -B build && cmake --build build -j8 && ./build/examples/neuro
 ```cpp
 auto spikes = np::spike::encode_rate(img, 100, 100);
 np::neuromorphic::LIFNeuron lif; lif.step(2.0);
-auto loihi = np::neuromorphic::NeuromorphicFactory::loihi();
-loihi->process(ea);
+np::neuromorphic::LifSimBackend sim(10.0, 1.0);
+auto out = sim.process(ea); // real per-channel LIF simulation
 ```
-Uses `np::event::EventArray` (COO, `shared_ptr`+`span`), `np::spike::encode_rate/temporal`, `LIF`/`Izhikevich` with `differential::Dual` surrogate, `STDP`, `INeuromorphicBackend` Strategy (CPU/Loihi2/SpiNNaker2), `QuantizedEventArray` Decorator.
+Uses `np::event::EventArray` (COO, `shared_ptr`+`span`), `np::spike::encode_rate/temporal`, `LIF`/`Izhikevich`, standalone `STDP` primitive, `INeuromorphicBackend` Strategy (CPU pass-through harness / LIF-sim), `QuantizedEventArray` Decorator. Software simulation only — no Loihi/SpiNNaker hardware.
 
 ## HBM / Tensor (`examples/hbm_matmul.cpp`)
 ```cpp
 auto ha = np::mem::migrate_to_hbm(a); // HBMArray
-auto c = np::tensor::matmul_fp8(a,b,1.0f,1.0f); // Hopper FP8 via QuantizedTensor
+auto c = np::tensor::matmul_fp8(a,b,1.0f,1.0f); // simulated FP8 (quantize/dequantize around FP32)
 auto acc = np::accelerator::AcceleratorFactory::gpu(); acc->matmul(a,b);
 ```
-`np::mem::HBMArray`/`CXLArray` zero-copy `shared_ptr` alias, `np::tensor::HopperBackend`/`AMXBackend` Strategy.
+`np::mem::HBMArray`/`CXLArray` zero-copy `shared_ptr` alias, `np::tensor::GpuFp32Backend`/`CpuBlockedBackend` Strategy.
 
 ## p-adic Hensel (`examples/padic_hensel.cpp`)
 ```cpp

@@ -8,6 +8,7 @@
 
 #include <cstdio>
 #include <filesystem>
+#include <fstream>
 #include <limits>
 
 int main()
@@ -135,6 +136,37 @@ int main()
         auto e = fromfile<int>(p, 4, 0, {2, 2});
         test::check(e.shape[0] == 2 && e.shape[1] == 2, "io fromfile shape");
         test::check(e.at(1, 1) == 40, "io fromfile shape value");
+    }
+
+    // truncated payload must throw, never return uninitialized storage
+    // (the old code accepted a short read with gcount() == 0 silently)
+    {
+        auto a = ndarray<int>::from_data({4}, {1, 2, 3, 4});
+        std::string p = tmpdir + "/trunc.npy";
+        save(p, a);
+        // Drop the last 8 payload bytes (half of the 16 payload bytes),
+        // keeping a valid header: exercises the payload short-read path.
+        {
+            std::ifstream src(p, std::ios::binary | std::ios::ate);
+            const auto full = src.tellg();
+            src.seekg(0);
+            std::vector<char> kept(static_cast<std::size_t>(full) - 8);
+            src.read(kept.data(), static_cast<std::streamsize>(kept.size()));
+            src.close();
+            std::ofstream dst(p, std::ios::binary | std::ios::trunc);
+            dst.write(kept.data(), static_cast<std::streamsize>(kept.size()));
+        }
+        bool threw = false;
+        try
+        {
+            auto b = load<int>(p);
+            (void)b;
+        }
+        catch (const std::runtime_error &)
+        {
+            threw = true;
+        }
+        test::check(threw, "io truncated payload throws");
     }
 
     fs::remove_all(tmpdir);

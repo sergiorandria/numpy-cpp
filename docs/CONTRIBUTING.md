@@ -8,8 +8,8 @@ Branch `dev` is the integration branch for micro-opts. `main` is stable (712 rou
 2. **Check ref** `numpy-reference/reference/generated/numpy.<func>.html` — match Python signature exactly (see `AGENTS.md`).
 3. **Implement** in `include/np/<module>.hpp` with Doxygen `Reference:` link and `NP_API`.
 4. **Test** `tests/test_<module>.cpp` using `tests/test_util.hpp` (`test::check`, `approx`).
-5. **Format** `clang-format -i include/np/*.hpp` — `.clang-format`: 2-space Allman, `ColumnLimit: 90`, `SortIncludes: Never`, `UseTab: Never`.
-6. **Build** `cmake -S . -B build && cmake --build build -j8 && ctest --test-dir build --output-on-failure` — must be **22/22**.
+5. **Format** `clang-format -i include/np/*.hpp` — `.clang-format`: 4-space, custom Allman-style braces, `ColumnLimit: 120`, `UseTab: Never`.
+6. **Build** `cmake -S . -B build && cmake --build build -j8 && ctest --test-dir build --output-on-failure` — must be **49/49**.
 7. **Commit** `feat(module): ...` with `file:line` (e.g. `ndarray.hpp:3116`). One logical task per commit, no `build/` artifacts (`CMakeCache.txt`, `build/` are in `.gitignore`).
 8. **PR** to `dev` — include bench delta if perf-related (see `PERFORMANCE.md`).
 
@@ -39,4 +39,4 @@ See `AGENTS.md` and `ARCHITECTURE.md` for layout (`include/np/detail/*` for `pro
 
 ## Release
 
-`dev` → `main` squash after 22/22 + `clang-format` clean. Tag `vX.Y-dev` for bench.
+`dev` → `main` squash after 49/49 + `clang-format` clean. Tag `vX.Y-dev` for bench.

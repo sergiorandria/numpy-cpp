@@ -1893,13 +1893,7 @@ template <typename T, typename U>
     requires(np::detail::is_bigint_v<T> || np::detail::is_bigint_v<U>)
 NP_NODISCARD auto solve(const ndarray<T> &a, const ndarray<U> &b) -> ndarray<double>
 {
-    auto ad = [&] {
-        if constexpr (np::detail::is_bigint_v<T>)
-            return from_bigint<double>(a);
-        else
-            return ndarray<double>(a.shape, dtype::float64, 0.0); // placeholder, will use as_bigint conversion?
-    }();
-    // Actually for mixed bigint/double, convert both to double
+    // Mixed bigint/double: convert both operands to double, then use double solve.
     ndarray<double> ad2, bd2;
     if constexpr (np::detail::is_bigint_v<T>)
         ad2 = from_bigint<double>(a);
@@ -4251,19 +4245,135 @@ NP_API template <typename T>
 NP_NODISCARD auto norm(const ndarray<T> &x, NormOrd ord, const std::vector<int> &axis, bool keepdims = false)
     -> ndarray<real_value_t<T>>
 {
-    using R = real_t<T>;
-    using RV = real_value_t<T>;
     using RV = real_value_t<T>;
     if (axis.empty())
     {
-        ndarray<RV> s(std::vector<int>{});
-        s.data()[0] = norm(x, ord);
+        const RV v = norm(x, ord);
         if (keepdims)
         {
-            std::vector<int> kd(x.ndim(), 1);
-            return ndarray<RV>(kd);
+            // NOTE (honesty audit): an earlier revision returned a fresh
+            // zero array here, discarding the computed value.
+            ndarray<RV> kd(std::vector<int>(x.ndim(), 1));
+            if (!kd.data().empty())
+            {
+                kd.data()[0] = v;
+            }
+            return kd;
         }
+        ndarray<RV> s(std::vector<int>{});
+        s.data()[0] = v;
         return s;
+    }
+    // Normalized, deduplicated reduced axes (same validation as vector_norm).
+    const std::size_t nd = x.ndim();
+    std::vector<bool> is_red(nd, false);
+    std::vector<std::size_t> red_axes;
+    for (int ax : axis)
+    {
+        const int r = ax < 0 ? ax + static_cast<int>(nd) : ax;
+        const std::size_t u = static_cast<std::size_t>(r);
+        if (r < 0 || r >= static_cast<int>(nd) || is_red[u])
+        {
+            throw std::invalid_argument("norm: invalid or repeated axis");
+        }
+        is_red[u] = true;
+        red_axes.push_back(u);
+    }
+    // NOTE (honesty audit): an earlier revision flattened all reduced axes
+    // into a vector p-norm for every order, so e.g. ord=One gave sum|x|
+    // instead of max column sum, and Two/NegTwo/Nuc/NegOne silently became
+    // Frobenius or p=2. Dispatch below was verified order-by-order against
+    // NumPy: >2 reduced axes always raises ("Improper number of dimensions
+    // to norm"); matrix orders over exactly 2 axes go per-slice to the
+    // scalar norm (SVD-backed for Two/NegTwo/Nuc); NegOne/NegTwo over 1 axis
+    // go per-slice over 1-D slices; 'fro'/'nuc' over 1 axis raise like NumPy
+    // ("Invalid norm order for vectors").
+    if (red_axes.size() > 2)
+    {
+        throw std::invalid_argument("norm: Improper number of dimensions to norm");
+    }
+    if (ord == NormOrd::Nuc && red_axes.size() != 2)
+    {
+        throw std::invalid_argument("norm: nuclear norm requires exactly 2 reduced axes");
+    }
+    if (ord == NormOrd::Fro && red_axes.size() == 1)
+    {
+        throw std::invalid_argument("norm: Invalid norm order 'fro' for vectors");
+    }
+    const bool need_slices = (red_axes.size() == 2 && ord != NormOrd::None) ||
+                             (red_axes.size() == 1 && (ord == NormOrd::NegOne || ord == NormOrd::NegTwo));
+    std::vector<int> out_shape;
+    std::vector<std::size_t> out_pos(nd, 0);
+    for (std::size_t i = 0; i < nd; ++i)
+    {
+        if (is_red[i])
+        {
+            if (keepdims)
+            {
+                out_pos[i] = out_shape.size();
+                out_shape.push_back(1);
+            }
+        }
+        else
+        {
+            out_pos[i] = out_shape.size();
+            out_shape.push_back(x.shape[i]);
+        }
+    }
+    if (need_slices)
+    {
+        ndarray<RV> out(out_shape);
+        const auto &xd = x.data(); // throws if null, like vector_norm
+        np::detail::Odometer odo(out_shape);
+        std::vector<int> slice_shape;
+        for (std::size_t r : red_axes)
+        {
+            slice_shape.push_back(x.shape[r]);
+        }
+        const std::size_t slice_n = red_axes.size() == 2 ? static_cast<std::size_t>(x.shape[red_axes[0]]) *
+                                                               static_cast<std::size_t>(x.shape[red_axes[1]])
+                                                         : static_cast<std::size_t>(x.shape[red_axes[0]]);
+        while (!odo.done())
+        {
+            const auto &oidx = odo.idx();
+            ndarray<T> slice(slice_shape);
+            auto &sd = slice.data();
+            for (std::size_t l = 0; l < slice_n; ++l)
+            {
+                std::size_t f = x.offset;
+                for (std::size_t k = 0; k < red_axes.size(); ++k)
+                {
+                    const std::size_t d = red_axes[k];
+                    const std::size_t dim = static_cast<std::size_t>(x.shape[d]);
+                    std::size_t coord = l;
+                    for (std::size_t k2 = k + 1; k2 < red_axes.size(); ++k2)
+                    {
+                        coord /= static_cast<std::size_t>(x.shape[red_axes[k2]]);
+                    }
+                    coord %= dim;
+                    f += coord * x.strides[d];
+                }
+                for (std::size_t d = 0; d < nd; ++d)
+                {
+                    if (!is_red[d])
+                    {
+                        f += oidx[out_pos[d]] * x.strides[d];
+                    }
+                }
+                sd[l] = static_cast<T>(xd[f]);
+            }
+            std::size_t fo = 0;
+            for (std::size_t d = 0; d < nd; ++d)
+            {
+                if (!is_red[d] || keepdims)
+                {
+                    fo += oidx[out_pos[d]] * out.strides[d];
+                }
+            }
+            out.data()[fo] = norm(slice, ord);
+            odo.advance();
+        }
+        return out;
     }
     double p = 2.0;
     if (ord == NormOrd::One)

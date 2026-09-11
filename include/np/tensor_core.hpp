@@ -1,19 +1,25 @@
 /**
  * @file tensor_core.hpp
- * @brief Tensor Core / AMX / SME matrix engines — FP8/FP4, Hopper/Blackwell +
- * AlphaEvolve.
+ * @brief Matrix engines — CPU blocked, Strassen, GPU FP32, quantized simulation.
  *
  * Provides `np::tensor` with:
  *  - Naive / blocked CPU matmul (AVX2/FMA, OpenMP)
  *  - Strassen (1969) 2x2 → 7 mults, recursive O(n^log2 7)
  *  - Winograd (1971) Strassen-Winograd variant (fewer adds)
- *  - AlphaEvolve (DeepMind 2025) 4x4 → 48 mults (vs 49 recursive Strassen, vs 64 naive)
- *    Discovered via evolutionary search with LLM+heuristics; rank of <4,4,4> = 48.
- *    Uses 48 rank-1 tensors: C = Wᵀ·((Uᵀ·vec(A)) ⊙ (Vᵀ·vec(B))) with
- *    U,V,W ∈ {-2,-1,-0.5,0,0.5,1,1.5,2}^{16×48} (hardcoded from paper suppl.).
+ *  - Tiled 4x4 two-level Strassen → 49 mults (vs 64 naive). The published
+ *    AlphaEvolve rank-48 factorisation for <4,4,4> (DeepMind 2025,
+ *    arXiv:2406.06662) is NOT implemented here — an earlier revision
+ *    claimed 48 while computing 49; the kernel is now counted honestly
+ *    (see matmul_4x4_49, rank_4x4).
+ *  - Coppersmith-Winograd namespace: documents the asymptotic exponent
+ *    only; its matmul() dispatches to Strassen (no CW tensors implemented).
+ *  - optimizer::search: returns hardcoded known ranks; it performs no
+ *    runtime evolutionary search despite the namespace docstring.
  *  - Hybrid auto-selection (size + dtype + hardware)
- *  - Quantized einsum / FP8/FP4 via Decorator (QuantizedTensor)
- *  - Hopper/AMX/SME dispatch via Strategy + Factory, GPU tensor cores via np::gpu
+ *  - Quantized einsum / simulated FP8 via Decorator (QuantizedTensor):
+ *    quantize/dequantize around FP32 compute, not FP8 tensor cores.
+ *  - GPU-FP32 / CPU-blocked dispatch via Strategy + Factory, cuBLAS via np::gpu.
+ *    No FP8/FP4 tensor-core path and no AMX tile path exist in this file.
  *
  * Design: Strategy (TensorBackend), Factory (TensorFactory), Decorator (QuantizedTensor),
  *         Template Method (blocked kernel), Observer (perf counters).
@@ -104,8 +110,17 @@ struct CPUBackend : TensorBackend
     }
 };
 
-// ── Hopper FP8 / Blackwell (CUDA 12.8+ / 13) ─────────────────────────────
-struct HopperBackend : TensorBackend
+// ── GPU FP32 (cuBLAS SGEMM via np::gpu) ───────────────────────────────────
+// NOTE (honesty audit): this was previously named GpuFp32Backend, computed
+// use_fp8/use_fp4 capability flags, discarded them with (void) casts, and
+// ran the same plain-FP32 cuBLAS path as every other backend while name()
+// reported "Blackwell-FP4"/"Hopper-FP8" on any machine. No FP8/FP4 tensor
+// path exists here (that would need cuBLASLt + quantize/dequantize around
+// real FP8 GEMM, untestable on non-Hopper hardware). What this backend
+// actually does is FP32 GEMM on the GPU with CPU fallback, so it is named
+// for that. Verified on Turing (sm_75): all capability predicates false,
+// clean FP32 dispatch.
+struct GpuFp32Backend : TensorBackend
 {
     ndarray<float> matmul(const ndarray<float> &a, const ndarray<float> &b) override
     {
@@ -114,15 +129,9 @@ struct HopperBackend : TensorBackend
             const std::size_t M = static_cast<std::size_t>(a.shape[0]);
             const std::size_t K = static_cast<std::size_t>(a.shape[1]);
             const std::size_t N = static_cast<std::size_t>(b.shape[1]);
-            // CUDA 12.8+ Blackwell FP4 / Hopper FP8 tensor cores
-            bool use_fp8 = gpu::has_fp8_tensor() || gpu::is_blackwell();
-            bool use_fp4 = gpu::has_fp4_tensor();
-            (void)use_fp8;
-            (void)use_fp4;
             if (M * N * K > 1'000'000)
             {
                 ndarray<float> out(std::vector<int>{static_cast<int>(M), static_cast<int>(N)});
-                // Try async alloc for large Blackwell tensors (stream-ordered)
                 if (gpu::try_matmul(a.data().data(), b.data().data(), out.data().data(), M, N, K))
                     return out;
             }
@@ -131,15 +140,11 @@ struct HopperBackend : TensorBackend
     }
     NP_NODISCARD std::string name() const noexcept override
     {
-        if (gpu::has_fp4_tensor())
-            return "Blackwell-FP4";
-        if (gpu::has_fp8_tensor())
-            return "Hopper-FP8";
-        return "Hopper-FP8";
+        return "GPU-FP32";
     }
     NP_NODISCARD bool is_available() const noexcept override
     {
-        return true;
+        return gpu::is_available();
     }
     NP_NODISCARD int rank() const noexcept override
     {
@@ -147,7 +152,12 @@ struct HopperBackend : TensorBackend
     }
 };
 
-struct AMXBackend : TensorBackend
+// ── CPU blocked GEMM (cache-blocked, AVX2/AVX512 FMA micro-kernels) ───────
+// NOTE (honesty audit): previously named AMXBackend with an "AMX" name()
+// while calling gpu::cpu_matmul — no _tile_* intrinsics anywhere in this
+// file. The backend genuinely runs the CPU blocked path (which does contain
+// AVX2 and AVX512 FMA kernels in gpu::cpu_matmul), so it is named for that.
+struct CpuBlockedBackend : TensorBackend
 {
     ndarray<float> matmul(const ndarray<float> &a, const ndarray<float> &b) override
     {
@@ -167,7 +177,7 @@ struct AMXBackend : TensorBackend
     }
     NP_NODISCARD std::string name() const noexcept override
     {
-        return "AMX";
+        return "CPU-blocked";
     }
 };
 
@@ -202,8 +212,9 @@ inline void winograd_2x2(const float *A, const float *B, float *C) noexcept
 {
     float a = A[0], b = A[1], c = A[2], d = A[3];
     float e = B[0], f = B[1], g = B[2], h = B[3];
-    // Winograd's 7 products with pre-additions
-    float s1 = c + d, s2 = a - c, s3 = b - d, s4 = e + f, s5 = g - e, s6 = h - f, s7 = f - h;
+    // Winograd's 7 products with pre-additions (s7 = f - h removed: it was
+    // computed but never read — dead variable, deleting it changes no numerics)
+    float s1 = c + d, s2 = a - c, s3 = b - d, s4 = e + f, s5 = g - e, s6 = h - f;
     float M1 = a * e;
     float M2 = b * g;
     float M3 = s1 * s5;
@@ -349,149 +360,111 @@ inline ndarray<float> matmul(const ndarray<float> &A, const ndarray<float> &B)
 }
 } // namespace strassen
 
-// ── AlphaEvolve 4×4 (48 mults) ───────────────────────────────────────────
-// Rank of <4,4,4> is 48 (AlphaEvolve 2025, vs 49 = 7×7 Strassen recursion, vs 64
-// naive). Decomposition: vec(C) = Wᵀ·((Uᵀ·vec(A)) ⊙ (Vᵀ·vec(B))) with U,V,W ∈
-// R^{16×48}. Coefficients in {-2,-1,-0.5,0,0.5,1,1.5,2} discovered via evolution +
-// gradient. The tables below are the exact 48-rank factorisation from the paper's
-// supplementary material (quantised to half-integers, error < 1e-6 vs exact).
+// ── Tiled 4×4 Strassen (49 mults) ──────────────────────────────────────────
+// Rank of <4,4,4> computed here is 49 = 7×7 Strassen recursion (vs 64 naive).
+// NOTE (honesty audit): this was previously documented as DeepMind
+// AlphaEvolve's rank-48 factorisation (arXiv:2406.06662) with a "fused"
+// 48th multiply. That claim was false — no U,V,W tables were ever embedded,
+// no reuse was ever performed (the comment even described a P7[0] = P1[6]
+// assignment that never existed in code). The published rank-48
+// decomposition is real but its 2304 half-integer coefficients are not
+// reproduced here, so this kernel is named and counted for what it is:
+// two-level Strassen, 49 scalar multiplies. See rank_4x4 below.
 namespace alpha_evolve
 {
-// Hardcoded U,V,W for 4×4 rank-48 — generated from AlphaEvolve's best solution
-// Each is 16×48 row-major: U[i*48 + r] is coeff for A_i in product r
-// Stored as float16-friendly half-integers, dequantised on the fly.
-// For brevity we store as int8 scaled by 2 (so 1 = 0.5, 2 = 1.0, etc.)
-// The full tables are 16*48 = 768 entries each, total 2304 coefficients.
-// Below is the actual evolved solution (truncated display, full in repo).
-// We embed the full tables as static constexpr arrays.
+// 2×2 Strassen intermediates: exactly 7 scalar multiplies. Templated on the
+// scalar type so tests can instantiate with a counting type and assert the
+// multiply count of any kernel built on this helper (see test_tensor_core).
+template <typename T> inline void strassen_2x2_products(const T *X, const T *Y, T *out_p) noexcept
+{
+    T a = X[0], b = X[1], c = X[2], d = X[3];
+    T e = Y[0], f = Y[1], g = Y[2], h = Y[3];
+    out_p[0] = (a + d) * (e + h);
+    out_p[1] = (c + d) * e;
+    out_p[2] = a * (f - h);
+    out_p[3] = d * (g - e);
+    out_p[4] = (a + b) * h;
+    out_p[5] = (c - a) * (e + f);
+    out_p[6] = (b - d) * (g + h);
+}
 
-// Due to size, we generate the 48-rank via Kronecker + rank-reduction:
-// Start from Strassen's 49 (kronecker of 2×2) and eliminate one rank via
-// nullspace vector c (found via SVD on 4096×49 tensor). The resulting
-// 48 is exact to 1e-7 vs naive.
-// The nullspace vector (from our earlier SVD) is:
-// c ≈ [0.1127, 0.1291, 0.1291, ...] — we use it to project out one dimension.
-// For simplicity we implement the 4×4 kernel via 7×7 Strassen recursion
-// but with one fewer scalar multiply (48) by fusing M1 and M7's inner 2×2.
+// Strassen 2×2 recombination of the 7 products into a 2×2 block.
+template <typename T> inline void strassen_2x2_recombine(const T *p, T *out) noexcept
+{
+    out[0] = p[0] + p[3] - p[4] + p[6];
+    out[1] = p[2] + p[4];
+    out[2] = p[1] + p[3];
+    out[3] = p[0] - p[1] + p[2] + p[5];
+}
 
-// Optimised 4×4 with 48 mults — uses Strassen for 2×2 blocks but shares one inner
-// product
-inline void matmul_4x4_48(const float *A, const float *B, float *C) noexcept
+// 4×4 kernel: 7 block products × strassen_2x2 (7 mults each) = 49 scalar
+// multiplies, then two-level Strassen recombination. Templated for the same
+// multiply-count testability as the helper above; production instantiates
+// float (identical codegen to the previous float-only version).
+template <typename T> inline void matmul_4x4_49(const T *A, const T *B, T *C) noexcept
 {
     // Partition A,B into 2×2 blocks of 2×2
-    // A11..A22 each 2×2 stored as 4 floats row-major
-    // Use Strassen for each block multiply, but for the 7 block products,
-    // the inner 2×2 multiplies for M1 and M7 share a subproduct when
-    // coefficient matrices are half-integer. AlphaEvolve found a sharing
-    // that saves 1 mult: M1 and M7's inner (a+d)*(e+h) share (a*d + ...).
-    // We implement the 48-mult directly via linear combinations (U,V,W).
+    // A11..A22 each 2×2 stored as 4 scalars row-major
+    T A11[4] = {A[0], A[1], A[4], A[5]};
+    T A12[4] = {A[2], A[3], A[6], A[7]};
+    T A21[4] = {A[8], A[9], A[12], A[13]};
+    T A22[4] = {A[10], A[11], A[14], A[15]};
+    T B11[4] = {B[0], B[1], B[4], B[5]};
+    T B12[4] = {B[2], B[3], B[6], B[7]};
+    T B21[4] = {B[8], B[9], B[12], B[13]};
+    T B22[4] = {B[10], B[11], B[14], B[15]};
+    T C11[4], C12[4], C21[4], C22[4];
 
-    // To keep header size reasonable, we implement the 48-mult as:
-    // 7 block products, each 2×2 via Strassen (7 mults) = 49, but we fuse
-    // the last scalar multiply of M7 (b-d)*(g+h) inner product's 7th term
-    // with M1's 1st term, saving 1. This is exactly the AlphaEvolve saving.
+    // 7 block products, each 2×2 via strassen_2x2_products (7 mults) = 49
+    // scalar multiplies total. No 48th-multiply fusion exists here.
 
-    // For correctness and header brevity, we implement the 4×4 as 48 via
-    // explicit 48 intermediate products using the evolved U,V,W.
-    // Here we use a compact representation: we hardcode the 48 products
-    // as linear combinations with coefficients in {-2,-1,0,1,2} scaled by 0.5.
-
-    // The full tables are large; we generate them on the fly via
-    // Kronecker + nullspace projection to keep header small.
-    // For this header we implement the kernel via recursive Strassen
-    // with the 48 optimisation applied as described, and verify vs naive.
-
-    // Fallback to Strassen 49, then correct the fused term:
-    float A11[4] = {A[0], A[1], A[4], A[5]};
-    float A12[4] = {A[2], A[3], A[6], A[7]};
-    float A21[4] = {A[8], A[9], A[12], A[13]};
-    float A22[4] = {A[10], A[11], A[14], A[15]};
-    float B11[4] = {B[0], B[1], B[4], B[5]};
-    float B12[4] = {B[2], B[3], B[6], B[7]};
-    float B21[4] = {B[8], B[9], B[12], B[13]};
-    float B22[4] = {B[10], B[11], B[14], B[15]};
-    float C11[4], C12[4], C21[4], C22[4];
-
-    // 7 block products, each 2×2 via Strassen (7 mults) = 49
-    // We will compute them but reuse one product: M1_7 and M7_7 are identical
-    // under AlphaEvolve's half-integer coefficients, so we compute 48.
-
-    // Helper to compute 2×2 Strassen with 7 mults and also return the 7 intermediates
-    auto strassen_2x2_intermediates = [](const float *X, const float *Y, float *out_p) {
-        float a = X[0], b = X[1], c = X[2], d = X[3];
-        float e = Y[0], f = Y[1], g = Y[2], h = Y[3];
-        out_p[0] = (a + d) * (e + h);
-        out_p[1] = (c + d) * e;
-        out_p[2] = a * (f - h);
-        out_p[3] = d * (g - e);
-        out_p[4] = (a + b) * h;
-        out_p[5] = (c - a) * (e + f);
-        out_p[6] = (b - d) * (g + h);
-    };
-
-    float P1[7], P2[7], P3[7], P4[7], P5[7], P6[7], P7[7];
+    T P1[7], P2[7], P3[7], P4[7], P5[7], P6[7], P7[7];
     // Compute linear combos for each Pi's inputs
-    float T1[4], T2[4];
+    T T1[4], T2[4];
     // P1 = (A11+A22)*(B11+B22)
     for (int i = 0; i < 4; ++i)
         T1[i] = A11[i] + A22[i];
     for (int i = 0; i < 4; ++i)
         T2[i] = B11[i] + B22[i];
-    strassen_2x2_intermediates(T1, T2, P1);
+    strassen_2x2_products<T>(T1, T2, P1);
     // P2 = (A21+A22)*B11
     for (int i = 0; i < 4; ++i)
         T1[i] = A21[i] + A22[i];
-    strassen_2x2_intermediates(T1, B11, P2);
+    strassen_2x2_products<T>(T1, B11, P2);
     // P3 = A11*(B12-B22)
     for (int i = 0; i < 4; ++i)
         T2[i] = B12[i] - B22[i];
-    strassen_2x2_intermediates(A11, T2, P3);
+    strassen_2x2_products<T>(A11, T2, P3);
     // P4 = A22*(B21-B11)
     for (int i = 0; i < 4; ++i)
         T2[i] = B21[i] - B11[i];
-    strassen_2x2_intermediates(A22, T2, P4);
+    strassen_2x2_products<T>(A22, T2, P4);
     // P5 = (A11+A12)*B22
     for (int i = 0; i < 4; ++i)
         T1[i] = A11[i] + A12[i];
-    strassen_2x2_intermediates(T1, B22, P5);
+    strassen_2x2_products<T>(T1, B22, P5);
     // P6 = (A21-A11)*(B11+B12)
     for (int i = 0; i < 4; ++i)
         T1[i] = A21[i] - A11[i];
     for (int i = 0; i < 4; ++i)
         T2[i] = B11[i] + B12[i];
-    strassen_2x2_intermediates(T1, T2, P6);
+    strassen_2x2_products<T>(T1, T2, P6);
     // P7 = (A12-A22)*(B21+B22)
     for (int i = 0; i < 4; ++i)
         T1[i] = A12[i] - A22[i];
     for (int i = 0; i < 4; ++i)
         T2[i] = B21[i] + B22[i];
-    strassen_2x2_intermediates(T1, T2, P7);
+    strassen_2x2_products<T>(T1, T2, P7);
 
-    // AlphaEvolve saving: P1[6] == P7[0] under half-integer coefficients
-    // (both are (b-d)*(g+h) style with same linear combo), so we reuse,
-    // counting 48 distinct scalar mults instead of 49.
-    // In our exact Strassen, they are not equal, but AlphaEvolve's evolved
-    // coefficients make them equal; we emulate by reusing P1[6] for P7[0].
-    // For correctness we keep both but count as 48 distinct.
-    // To achieve 48, we set P7[0] = P1[6] (fused)
-
-    // Recombine 2×2 blocks from 7*7 = 49 (now 48 distinct) intermediate 2×2 products
-    // Each Pi is 2×2 (4 values) stored as 7*4? Actually P* are 7 each, but we need 2×2
-    // block results Convert P* (7) to 2×2 block via Strassen recombination:
-    auto recombine = [](const float *p, float *out) {
-        out[0] = p[0] + p[3] - p[4] + p[6];
-        out[1] = p[2] + p[4];
-        out[2] = p[1] + p[3];
-        out[3] = p[0] - p[1] + p[2] + p[5];
-    };
-    float M1[4], M2[4], M3[4], M4[4], M5[4], M6[4], M7[4];
-    recombine(P1, M1);
-    recombine(P2, M2);
-    recombine(P3, M3);
-    recombine(P4, M4);
-    recombine(P5, M5);
-    recombine(P6, M6);
-    recombine(P7, M7);
+    // Recombine the 7 products of each Pi into its 2×2 block result.
+    T M1[4], M2[4], M3[4], M4[4], M5[4], M6[4], M7[4];
+    strassen_2x2_recombine<T>(P1, M1);
+    strassen_2x2_recombine<T>(P2, M2);
+    strassen_2x2_recombine<T>(P3, M3);
+    strassen_2x2_recombine<T>(P4, M4);
+    strassen_2x2_recombine<T>(P5, M5);
+    strassen_2x2_recombine<T>(P6, M6);
+    strassen_2x2_recombine<T>(P7, M7);
 
     // Final 4×4 recombination (same as Strassen)
     for (int i = 0; i < 4; ++i)
@@ -532,15 +505,13 @@ inline ndarray<float> matmul(const ndarray<float> &A, const ndarray<float> &B)
     if (M == 4 && K == 4 && N == 4 && A.is_contiguous() && B.is_contiguous())
     {
         ndarray<float> C(std::vector<int>{4, 4});
-        matmul_4x4_48(A.data().data(), B.data().data(), C.data().data());
-        // Verify vs naive with tolerance, fallback if needed (ensures correctness)
-        // This keeps the 48-mult path exact; fallback is rare
+        matmul_4x4_49<float>(A.data().data(), B.data().data(), C.data().data());
         return C;
     }
-    // For larger powers of 2, tile 4×4 AlphaEvolve
+    // For larger multiples of 4, tile the 4×4 kernel
     if (M % 4 == 0 && K % 4 == 0 && N % 4 == 0 && M >= 8)
     {
-        // Tiled 4×4 AlphaEvolve: M/4 x K/4 x N/4 tiles, each 4×4 uses 48
+        // Tiled 4×4: M/4 x K/4 x N/4 tiles, each 4×4 uses 49 mults
         std::size_t Mt = M / 4, Kt = K / 4, Nt = N / 4;
         ndarray<float> C(std::vector<int>{static_cast<int>(M), static_cast<int>(N)});
         std::fill(C.data().begin(), C.data().end(), 0.0f);
@@ -557,7 +528,7 @@ inline ndarray<float> matmul(const ndarray<float> &A, const ndarray<float> &B)
                     for (int kk = 0; kk < 4; ++kk)
                         for (int jj = 0; jj < 4; ++jj)
                             Bt[kk * 4 + jj] = B(p * 4 + kk, j * 4 + jj);
-                    matmul_4x4_48(At, Bt, Ct);
+                    matmul_4x4_49<float>(At, Bt, Ct);
                     for (int ii = 0; ii < 4; ++ii)
                         for (int jj = 0; jj < 4; ++jj)
                             C(i * 4 + ii, j * 4 + jj) += Ct[ii * 4 + jj];
@@ -568,8 +539,11 @@ inline ndarray<float> matmul(const ndarray<float> &A, const ndarray<float> &B)
     return strassen::matmul(A, B);
 }
 
-// Rank for <4,4,4> is 48 (vs 49 Strassen, 64 naive)
-constexpr int rank_4x4 = 48;
+// Rank of <4,4,4> as computed by matmul_4x4_49: 49 (two-level Strassen,
+// vs 64 naive). The published AlphaEvolve rank-48 decomposition exists in the
+// literature but is NOT implemented here (its coefficient tables were never
+// embedded); 48 must not be claimed for this code path.
+constexpr int rank_4x4 = 49;
 constexpr int rank_3x3 = 23; // Laderman 1976
 constexpr int rank_2x2 = 7;  // Strassen
 
@@ -652,18 +626,18 @@ inline ndarray<float> matmul(const ndarray<float> &A, const ndarray<float> &B)
                               static_cast<std::size_t>(B.shape[1])});
     if (n < 256)
         return strassen::matmul(A, B);
-    // For n ≥ 256, use 2-level Strassen + Winograd (simulates CW's
-    // rectangular partitioning). This is not the full CW, but captures
-    // the ~2% win over pure Strassen for large n.
+    // For n ≥ 256 there is no separate CW kernel: both branches dispatch to
+    // strassen::matmul (no full CW, no measured win — the name documents the
+    // asymptotic family only, see the file doc-block).
     return strassen::matmul(A, B);
 }
 } // namespace coppersmith_winograd
 
-// ── AlphaEvolve generic optimizer (evolutionary + gradient) ────────────
-// At runtime, for arbitrary <m,n,p> we can attempt to find a low-rank
-// decomposition via simple gradient descent on U,V,W. This is the same
-// idea as AlphaEvolve: evolve + optimize. We provide a tiny optimizer
-// that for small sizes (e.g., 3×3×3) can rediscover Laderman's 23.
+// ── Rank lookup (NOT an evolutionary optimizer) ──────────────────────────
+// search() below performs no gradient descent or evolution: it returns
+// hardcoded known ranks (Strassen 7, Laderman 23, tiled-Strassen 49 for
+// <4,4,4>). The name and Decomp struct predate this honesty audit and are
+// kept for API stability; do not mistake this for a working search.
 namespace optimizer
 {
 struct Decomp
@@ -676,11 +650,17 @@ struct Decomp
 // For larger, we just return the known best rank.
 inline Decomp search(int m, int n, int p, int target_rank, int iters = 200)
 {
+    // iters is accepted for API stability (a real search would iterate) but
+    // unused: this function returns hardcoded ranks, no search runs.
+    (void)iters;
     Decomp d;
     d.rank = target_rank;
-    // Hardcode known optimal ranks (AlphaEvolve results)
+    // Hardcode known ranks. NOTE: <4,4,4> reports 49 — the rank this
+    // codebase's tiled kernel actually computes. The literature best is 48
+    // (AlphaEvolve), but those tables are not implemented here, so claiming
+    // 48 would repeat the matmul_4x4 falsehood this audit removed.
     if (m == 4 && n == 4 && p == 4)
-        d.rank = 48;
+        d.rank = 49;
     else if (m == 3 && n == 3 && p == 3)
         d.rank = 23;
     else if (m == 2 && n == 2 && p == 2)
@@ -717,11 +697,15 @@ struct StrassenBackend : TensorBackend
     }
 };
 
-struct AlphaEvolveBackend : TensorBackend
+// NOTE (honesty audit): previously named AlphaEvolveBackend ("AlphaEvolve-48",
+// rank 48). The kernel it dispatches to computes 49 multiplies (see
+// matmul_4x4_49), so the class, name(), and rank() now say 49.
+struct Strassen4x4Backend : TensorBackend
 {
     ndarray<float> matmul(const ndarray<float> &a, const ndarray<float> &b) override
     {
-        // Use 48-mult for 4×4, Strassen for other powers of two, else GPU/CPU
+        // Use 49-mult tiled kernel for multiples of 4, Strassen for other
+        // powers of two, else GPU/CPU
         std::size_t M = a.shape[0], K = a.shape[1], N = b.shape[1];
         if (M == 4 && K == 4 && N == 4)
             return alpha_evolve::matmul(a, b);
@@ -732,20 +716,18 @@ struct AlphaEvolveBackend : TensorBackend
             return strassen::matmul(a, b);
         if (gpu::is_available() && M * N * K > 1'000'000)
         {
-            HopperBackend h;
-            auto r = h.matmul(a, b);
-            // Verify AlphaEvolve path would be correct; fallback already
-            return r;
+            GpuFp32Backend h;
+            return h.matmul(a, b);
         }
         return linalg::matmul(a, b);
     }
     NP_NODISCARD std::string name() const noexcept override
     {
-        return "AlphaEvolve-48";
+        return "Strassen-49-4x4";
     }
     NP_NODISCARD int rank() const noexcept override
     {
-        return 48;
+        return 49;
     }
 };
 
@@ -756,21 +738,21 @@ struct HybridBackend : TensorBackend
     {
         std::size_t M = a.shape[0], K = a.shape[1], N = b.shape[1];
         std::size_t ops = M * K * N;
-        // 4×4 → AlphaEvolve 48 (saves 1 mult, ~2% win, exact)
+        // 4×4 → tiled two-level Strassen (49 mults, exact)
         if (M == 4 && K == 4 && N == 4)
             return alpha_evolve::matmul(a, b);
         // Power-of-two large → Strassen (n^log2 7 ≈ n^2.81)
         if (strassen::is_pow2(M) && strassen::is_pow2(K) && strassen::is_pow2(N) && ops > 1'000'000)
             return strassen::matmul(a, b);
-        // Tiled 4×4 AlphaEvolve for multiples of 4
+        // Tiled 4×4 Strassen-49 for multiples of 4
         if (M % 4 == 0 && K % 4 == 0 && N % 4 == 0 && ops > 500'000)
             return alpha_evolve::matmul(a, b);
-        // GPU tensor core for very large FP
+        // GPU FP32 for very large
         if (gpu::is_available() && ops > 1'000'000 && a.is_contiguous() && b.is_contiguous())
-            return HopperBackend{}.matmul(a, b);
-        // AMX for medium
+            return GpuFp32Backend{}.matmul(a, b);
+        // CPU blocked for medium
         if (ops > 500'000)
-            return AMXBackend{}.matmul(a, b);
+            return CpuBlockedBackend{}.matmul(a, b);
         return linalg::matmul(a, b);
     }
     NP_NODISCARD std::string name() const noexcept override
@@ -785,21 +767,21 @@ struct TensorFactory
     {
         return std::make_shared<CPUBackend>();
     }
-    NP_NODISCARD static std::shared_ptr<TensorBackend> hopper()
+    NP_NODISCARD static std::shared_ptr<TensorBackend> gpu_fp32()
     {
-        return std::make_shared<HopperBackend>();
+        return std::make_shared<GpuFp32Backend>();
     }
-    NP_NODISCARD static std::shared_ptr<TensorBackend> amx()
+    NP_NODISCARD static std::shared_ptr<TensorBackend> cpu_blocked()
     {
-        return std::make_shared<AMXBackend>();
+        return std::make_shared<CpuBlockedBackend>();
     }
     NP_NODISCARD static std::shared_ptr<TensorBackend> strassen()
     {
         return std::make_shared<StrassenBackend>();
     }
-    NP_NODISCARD static std::shared_ptr<TensorBackend> alpha_evolve()
+    NP_NODISCARD static std::shared_ptr<TensorBackend> strassen_4x4()
     {
-        return std::make_shared<AlphaEvolveBackend>();
+        return std::make_shared<Strassen4x4Backend>();
     }
     NP_NODISCARD static std::shared_ptr<TensorBackend> hybrid()
     {
@@ -809,8 +791,11 @@ struct TensorFactory
     {
         if (gpu::is_available())
             return std::make_shared<HybridBackend>();
-#if defined(__AMX_TILE__) || defined(__AVX512F__)
-        return amx();
+        // No __AMX_TILE__ branch: nothing in this file uses AMX tile
+        // intrinsics (see CpuBlockedBackend). Wide-SIMD CPUs still get the
+        // blocked path, whose micro-kernels cover AVX2 and AVX512 FMA.
+#if defined(__AVX512F__)
+        return cpu_blocked();
 #else
         return hybrid();
 #endif
@@ -821,7 +806,7 @@ struct TensorFactory
 // C++23: closed set via variant + visit + deducing this (zero-cost, no virtual)
 // Produced when CXX_STANDARD 23 is set in CMake (GCC 13+, Clang 16+)
 using TensorBackendVariant =
-    std::variant<CPUBackend, HopperBackend, AMXBackend, StrassenBackend, AlphaEvolveBackend, HybridBackend>;
+    std::variant<CPUBackend, GpuFp32Backend, CpuBlockedBackend, StrassenBackend, Strassen4x4Backend, HybridBackend>;
 // Example deducing-this helper for name() — C++23
 struct TensorBackendHelper
 {
@@ -888,7 +873,7 @@ NP_NODISCARD inline ndarray<float> matmul_fp8(const ndarray<float> &a, const nda
 {
     if (gpu::is_available() && a.size() * b.size() > 1'000'000)
     {
-        HopperBackend h;
+        GpuFp32Backend h;
         auto qa = quantize(a, scale_a, TensorDtype::FP8);
         auto qb = quantize(b, scale_b, TensorDtype::FP8);
         auto qaq = QuantizedTensor<float>{qa, scale_a, TensorDtype::FP8};
@@ -917,7 +902,7 @@ NP_NODISCARD inline ndarray<float> matmul_fp16(const ndarray<half> &a, const nda
     for (size_t i = 0; i < b.size(); ++i)
         bf.data()[i] = static_cast<float>(b.data()[i]);
     if (gpu::is_available())
-        return HopperBackend{}.matmul(af, bf);
+        return GpuFp32Backend{}.matmul(af, bf);
     return linalg::matmul(af, bf);
 }
 NP_NODISCARD inline ndarray<float> matmul_bf16(const ndarray<bfloat16> &a, const ndarray<bfloat16> &b)
@@ -928,13 +913,13 @@ NP_NODISCARD inline ndarray<float> matmul_bf16(const ndarray<bfloat16> &a, const
     for (size_t i = 0; i < b.size(); ++i)
         bf.data()[i] = static_cast<float>(b.data()[i]);
     if (gpu::is_available())
-        return HopperBackend{}.matmul(af, bf);
+        return GpuFp32Backend{}.matmul(af, bf);
     return linalg::matmul(af, bf);
 }
 
 // ── Einsum via tensor cores (quantized) ──────────────────────────────────
 template <typename T>
-NP_NODISCARD inline ndarray<float> einsum_alpha_evolve(const std::string &eq, const ndarray<T> &a, const ndarray<T> &b)
+NP_NODISCARD inline ndarray<float> einsum_matmul(const std::string &eq, const ndarray<T> &a, const ndarray<T> &b)
 {
     // Manual float conversion to handle float16 tag vs half correctly
     auto to_float = [](const ndarray<T> &x) {
@@ -946,7 +931,7 @@ NP_NODISCARD inline ndarray<float> einsum_alpha_evolve(const std::string &eq, co
     auto af = to_float(a), bf = to_float(b);
     // Only ij,jk->ik supported for now (matmul)
     if (eq == "ij,jk->ik" || eq == "ik,kj->ij")
-        return AlphaEvolveBackend{}.matmul(af, bf);
+        return Strassen4x4Backend{}.matmul(af, bf);
     return linalg::matmul(af, bf);
 }
 

@@ -17,6 +17,7 @@
 #include <complex>
 #include <cstddef>
 #include <cstdint>
+#include <mutex>
 #include <numbers>
 #include <optional>
 #include <stdexcept>
@@ -232,13 +233,19 @@ struct BluesteinPlan
     std::vector<Cplx> conv;   ///< Forward FFT of the padded reversed chirp
 };
 
-/** @brief Per-length cached twiddle tables (not thread-safe). */
+/** @brief Per-length cached twiddle tables (thread-safe via internal mutex). */
 class TwiddleCache
 {
   public:
     /** @brief Forward radix-2 table t[k] = exp(-2*pi*i*k/n), k = 0..n/2. */
     NP_NODISCARD const std::vector<Cplx> &radix_table(std::size_t n) const
     {
+        // NOTE (honesty audit): an earlier revision documented this cache as
+        // "not thread-safe" while transform_lines/rfft_lines/irfft_lines fed
+        // it to ThreadPool::global().parallel_for closures — concurrent lazy
+        // emplace into these maps is a data race. The mutex below closes it;
+        // lookups serialize briefly, dwarfed by FFT work.
+        std::lock_guard<std::recursive_mutex> lock(mtx_);
         auto it = fwd_.find(n);
         if (it == fwd_.end())
         {
@@ -250,6 +257,7 @@ class TwiddleCache
     /** @brief Lazily-built Bluestein plan (chirp + kernel FFT). */
     NP_NODISCARD const BluesteinPlan &bluestein_plan(std::size_t n, bool inverse) const
     {
+        std::lock_guard<std::recursive_mutex> lock(mtx_);
         auto &tbl = inverse ? bn_ : bf_;
         auto it = tbl.find(n);
         if (it == tbl.end())
@@ -284,11 +292,13 @@ class TwiddleCache
     }
 
   private:
+    // Recursive: bluestein_plan() calls radix_table() while holding the lock.
+    mutable std::recursive_mutex mtx_;
     mutable std::unordered_map<std::size_t, std::vector<Cplx>> fwd_;
     mutable std::unordered_map<std::size_t, BluesteinPlan> bf_, bn_;
 };
 
-/** @brief Returns the shared twiddle cache (not thread-safe). */
+/** @brief Returns the shared twiddle cache (thread-safe). */
 NP_NODISCARD inline const TwiddleCache &twiddle_cache()
 {
     static const TwiddleCache cache;

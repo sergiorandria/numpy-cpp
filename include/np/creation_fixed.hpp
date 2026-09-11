@@ -25,11 +25,15 @@
 #ifndef NP_CREATION_FIXED_HPP
 #define NP_CREATION_FIXED_HPP
 
+#include <cctype>
 #include <cstddef>
 #include <cstring>
+#include <optional>
+#include <sstream>
 #include <stdexcept>
 #include <string>
 #include <type_traits>
+#include <unordered_map>
 #include <vector>
 
 #include "api_macros.hpp"
@@ -276,8 +280,6 @@ NP_API template <std::size_t N, bool endpoint = true, typename T> NP_NODISCARD c
     return out;
 }
 
-// Normal comment: fixed variants for asanyarray / ascontiguousarray / frombuffer
-
 NP_API template <typename T, int... E>
 NP_NODISCARD constexpr auto asanyarray(const ndarrayf<T, E...> &a) -> ndarrayf<T, E...>
 {
@@ -285,10 +287,21 @@ NP_NODISCARD constexpr auto asanyarray(const ndarrayf<T, E...> &a) -> ndarrayf<T
 }
 
 NP_API template <typename T, int... E>
+NP_NODISCARD constexpr auto asanyarray(ndarrayf<T, E...> &&a) -> ndarrayf<T, E...>
+{
+    return std::move(a);
+}
+
+NP_API template <typename T, int... E>
 NP_NODISCARD constexpr auto ascontiguousarray(const ndarrayf<T, E...> &a) -> ndarrayf<T, E...>
 {
-    // Fixed storage is always C-contiguous
     return a;
+} // fixed storage is always C-contiguous
+
+NP_API template <typename T, int... E>
+NP_NODISCARD constexpr auto ascontiguousarray(ndarrayf<T, E...> &&a) -> ndarrayf<T, E...>
+{
+    return std::move(a);
 }
 
 NP_API template <typename T, int... E>
@@ -302,12 +315,115 @@ NP_NODISCARD auto frombuffer(const std::vector<char> &buffer, std::size_t offset
     return out;
 }
 
-NP_API template <typename T, int... E>
-NP_NODISCARD constexpr auto require(const ndarrayf<T, E...> &a, const std::string &requirements = "C")
-    -> ndarrayf<T, E...>
+namespace detail
 {
-    (void)requirements;
+
+inline const std::unordered_map<std::string, char> &require_aliases()
+{
+    static const std::unordered_map<std::string, char> aliases = {
+        {"C", 'C'},
+        {"C_CONTIGUOUS", 'C'},
+        {"CONTIGUOUS", 'C'},
+        {"F", 'F'},
+        {"F_CONTIGUOUS", 'F'},
+        {"FORTRAN", 'F'},
+        {"A", 'A'},
+        {"ALIGNED", 'A'},
+        {"W", 'W'},
+        {"WRITEABLE", 'W'},
+        {"WRITABLE", 'W'},
+        {"O", 'O'},
+        {"OWNDATA", 'O'},
+        {"E", 'E'},
+        {"ENSUREARRAY", 'E'},
+    };
+    return aliases;
+}
+
+inline std::string require_upper(std::string tok)
+{
+    for (auto &c : tok)
+        c = static_cast<char>(std::toupper(static_cast<unsigned char>(c)));
+    return tok;
+}
+
+inline std::optional<char> require_try_lookup(const std::string &normalized_tok)
+{
+    auto it = require_aliases().find(normalized_tok);
+    return it == require_aliases().end() ? std::nullopt : std::optional<char>(it->second);
+}
+
+inline char require_lookup(const std::string &tok)
+{
+    if (auto v = require_try_lookup(require_upper(tok)))
+        return *v;
+    throw std::invalid_argument("require: unknown requirement '" + tok + "'");
+}
+
+inline std::vector<char> require_parse(const std::string &requirements)
+{
+    std::vector<char> flags;
+    if (requirements.find_first_of(", \t") == std::string::npos)
+    {
+        // No separator: could be one multi-char alias ("OWNDATA") or a run of
+        // single-char flags ("CFA"). Try the whole token as one alias first —
+        // only fall back to per-character parsing if that lookup fails.
+        if (!requirements.empty())
+            if (auto whole = require_try_lookup(require_upper(requirements)))
+                return {*whole};
+        for (char c : requirements)
+            flags.push_back(require_lookup(std::string(1, c)));
+        return flags;
+    }
+    std::istringstream iss(requirements);
+    std::string chunk;
+    while (std::getline(iss, chunk, ','))
+    {
+        std::istringstream wss(chunk);
+        std::string word;
+        while (wss >> word)
+            flags.push_back(require_lookup(word));
+    }
+    return flags;
+}
+
+template <typename T, int... E> void require_validate(const std::string &requirements)
+{
+    for (char f : require_parse(requirements))
+    {
+        switch (f)
+        {
+        case 'C':
+        case 'A':
+        case 'W':
+        case 'O':
+        case 'E':
+            break; // trivially true: fixed storage is C-contiguous, self-owning, no views
+        case 'F':
+            if constexpr (sizeof...(E) > 1)
+                throw std::invalid_argument("require: 'F' (Fortran order) requested but ndarrayf<T,E...> "
+                                            "only ever stores row-major order for rank > 1");
+            break; // rank <= 1: C-order and F-order coincide
+        default:
+            throw std::invalid_argument("require: unhandled requirement flag");
+        }
+    }
+}
+
+} // namespace detail
+
+NP_API template <typename T, int... E>
+NP_NODISCARD auto require(const ndarrayf<T, E...> &a, const std::string &requirements = "C") -> ndarrayf<T, E...>
+{
+    detail::require_validate<T, E...>(requirements);
     return a;
+}
+
+NP_API template <typename T, int... E>
+NP_NODISCARD auto require(ndarrayf<T, E...> &&a, const std::string &requirements = "C") -> ndarrayf<T, E...>
+{
+    detail::require_validate<T, E...>(requirements);
+    return std::move(a);
 }
 
 } // namespace np
