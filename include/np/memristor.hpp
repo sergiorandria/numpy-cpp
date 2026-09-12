@@ -1073,7 +1073,8 @@ class Crossbar
     ndarray<float> dot_identity_probe_(bool noisy) const
     {
         const int n = rows_safe_();
-        const int m = cols_safe_();
+        if (n == 0)
+            return ndarray<float>();
         // probe with normalized ones vector
         ndarray<float> x(std::vector<int>{n});
         for (auto &v : x.data())

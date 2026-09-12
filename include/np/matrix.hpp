@@ -26,6 +26,14 @@
 #include "api_macros.hpp"
 #include "ndarray.hpp"
 
+// Self-use of the deprecated Matrix API below is intentional (thin decorator
+// over ndarray); silence -Wdeprecated-declarations locally so real warnings
+// stay visible. MSVC reports C4996 at lower default severity; no pragma needed.
+#if defined(__clang__) || defined(__GNUC__)
+#pragma GCC diagnostic push
+#pragma GCC diagnostic ignored "-Wdeprecated-declarations"
+#endif
+
 namespace np
 {
 
@@ -532,5 +540,9 @@ template <typename T, typename U> NP_API NP_NODISCARD auto solve(const Matrix<T>
 }
 
 } // namespace np
+
+#if defined(__clang__) || defined(__GNUC__)
+#pragma GCC diagnostic pop
+#endif
 
 #endif // NP_MATRIX_HPP

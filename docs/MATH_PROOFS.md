@@ -2,7 +2,7 @@
 
 > **Scope:** 712+ distinct NumPy 2.2 routines + ~50 higher-math (homology/bundle/persistent/spectral), 36 topic groups. Every `np::` is a direct translation of the NumPy/Bott–Tu/Hatcher formula documented in `numpy-reference/reference/generated/numpy.<func>.html` with Doxygen `Reference:` link per function. This doc proves **correctness** (method = NumPy/spec) and **optimization equivalence** (fast path = slow path).
 
-*Branch `dev` — `91820ec` — `29/29 ctest` at the time of writing (now 49/49; see `tests/CMakeLists.txt`).*
+*Branch `dev` — `91820ec` — `29/29 ctest` at the time of writing (now 50/50; see `tests/CMakeLists.txt`).*
 
 ---
 

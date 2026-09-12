@@ -263,7 +263,7 @@ NP_NODISCARD inline std::vector<bigint> pontryagin_classes(const VectorBundle &E
     return characteristic_classes(E, base).pontryagin;
 }
 
-NP_NODISCARD inline bigint euler_characteristic_via_euler_class(const VectorBundle &E,
+NP_NODISCARD inline bigint euler_characteristic_via_euler_class(const VectorBundle &,
                                                                 const manifold::AbstractManifold *base)
 {
     // For tangent bundle, ∫_M e(TM) = χ(M)

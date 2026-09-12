@@ -68,7 +68,7 @@ No linking. No Python runtime. No code generation. Just `#include <np/np.hpp>`.
 * **Zero-overhead** — header-only `INTERFACE` library (`cmake --install` just copies headers). Views are `shared_ptr` aliases, not copies. Contiguous fast paths use `memcpy` / direct `T* __restrict`.
 * **Portable SIMD** — auto-detected: SSE4.2 / AVX2 / AVX-512 on x86-64, NEON on ARM64, WASM SIMD128, RISC-V Vector, POWER VSX. Scalar fallback always correct.
 * **Two array engines** — `ndarray<T>` (dynamic, heap) + `ndarrayf<T, Extents...>` (fixed, stack, `constexpr`-foldable).
-* **Production-ready** — lock-free Chase-Lev threadpool, `49/49` CTest suites, `clang-format` enforced, BSD-3-Clause.
+* **Production-ready** — lock-free Chase-Lev threadpool, `50/50` CTest suites, `clang-format` enforced, BSD-3-Clause.
 
 > If you embed scientific computing in C++ — games, robotics, trading, edge inference — numpy-cpp lets you keep NumPy semantics without shipping Python.
 
@@ -342,7 +342,7 @@ tests/                49 CTest suites + bench_math / bench_hardware (AVX, manual
 
 ```bash
 cmake -S . -B build && cmake --build build -j8
-ctest --test-dir build --output-on-failure   # 49/49
+ctest --test-dir build --output-on-failure   # 50/50
 
 #single suite verbose
 ./build/tests/test_ndarray --verbose
@@ -353,7 +353,7 @@ g++ -std=c++20 -I include tests/test_math.cpp -o /tmp/t && /tmp/t
 cmake --build build --target bench_math && ./build/tests/bench_math
 ```
 
-CI target is `49/49` green. Every fast path has a scalar fallback exercised by tests.
+CI target is `50/50` green. Every fast path has a scalar fallback exercised by tests.
 
 ---
 

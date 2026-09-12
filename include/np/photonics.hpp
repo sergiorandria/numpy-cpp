@@ -1165,7 +1165,6 @@ struct PhotonicsFactory
         if (A.ndim() != 2)
             throw std::invalid_argument("from_matrix requires 2D array");
         // Use linalg SVD (real path) – promote to double
-        using R = double;
         // Convert A to double complex for photonics if needed
         int M = A.shape[0], N = A.shape[1];
         // Use linalg::svd for real-valued A; for complex we still use linalg path

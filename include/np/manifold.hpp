@@ -147,11 +147,7 @@ NP_NODISCARD inline homology::SimplicialComplex wedge_simplicial(
     int next_id = 1; // 0 reserved for wedge point
     for (auto *K : comps)
     {
-        // map old vertex -> new vertex
-        std::vector<int> vmap;
-        int nverts = K->simplices.empty() ? 0 : static_cast<int>(K->simplices[0].size());
-        // Need vertex count: assume vertices are 0..nverts-1 contiguously
-        // For general complexes vertices may be sparse; collect all vertex ids
+        // Collect all vertex ids (vertices may be sparse, not 0..n-1).
         std::vector<int> all_verts;
         if (!K->simplices.empty() && !K->simplices[0].empty())
         {

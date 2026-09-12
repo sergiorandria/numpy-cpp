@@ -2242,7 +2242,6 @@ NP_API template <typename T> NP_NODISCARD auto norm(const ndarray<T> &x, NormOrd
 NP_API template <typename T>
 NP_NODISCARD auto matrix_norm(const ndarray<T> &x, NormOrd ord = NormOrd::Fro) -> real_value_t<T>
 {
-    using R = real_t<T>;
     using RV = real_value_t<T>;
     if (x.ndim() != 2)
     {

@@ -2,7 +2,7 @@
 
 All notable changes to `numpy-cpp` will be documented here. Format based on [Keep a Changelog](https://keepachangelog.com/en/1.0.0/), versioning follows [SemVer](https://semver.org/spec/v2.0.0.html).
 
-## [Unreleased] — honesty pass + 49/49 suites
+## [Unreleased] — honesty pass + 50/50 suites
 
 ### Added
 - **Leech lattice** — `LatticeFactory::leech()` (was a documented stub): Λ24 via extended binary Golay-code lifting (12 cyclic-shift code lifts + 11 pair vectors + verified odd row, scaled by 1/√8), with `detail::golay24_*` helpers. Provenance verified in `test_lattice.cpp`: Golay weight enumerator {0:1, 8:759, 12:2576, 16:759, 24:1}, exact integer-preimage determinant 2^36 (⇒ unimodular), even Gram matrix, GF(2) row space {0, all-ones}, exhaustive no-roots search (170016 candidates), all 1104 type-(±4,±4) and sampled octad type-(±2⁸) minimal vectors in span — hence Λ24 by Niemeier uniqueness.
@@ -13,7 +13,7 @@ All notable changes to `numpy-cpp` will be documented here. Format based on [Kee
 - **SIMD detection** — `simd.hpp` used an `elif` chain that defined only the top ISA macro, silently disabling all SSE2 kernels on standard `-msse4.2`/AVX builds; detection is now cumulative (also fixes `Features::has_sse2` reporting).
 
 ### Fixed
-- **Docs honesty** — `README.md` no longer claims `0 stubs` or bare `Loihi2/SpiNNaker`, `HBM/CXL`, `Hopper/AMX` backends: `neuromorphic` is CPU LIF simulation, `memory` is host storage with `HbmHintArray`/`CxlHintArray` placement hints (`memory.hpp:104-176`), `tensor` is blocked-CPU/FP32-GPU dispatch with quantize-around-FP32 (`tensor_core.hpp:22`), `accelerator` is CPU/GPU/ReRAM-sim (`accelerator.hpp:226-242`). Documented `other.hpp` parity shims and default PQC wrappers as intentional stubs; test count corrected to `49/49` across `README.md`, `docs/` and CI step name.
+- **Docs honesty** — `README.md` no longer claims `0 stubs` or bare `Loihi2/SpiNNaker`, `HBM/CXL`, `Hopper/AMX` backends: `neuromorphic` is CPU LIF simulation, `memory` is host storage with `HbmHintArray`/`CxlHintArray` placement hints (`memory.hpp:104-176`), `tensor` is blocked-CPU/FP32-GPU dispatch with quantize-around-FP32 (`tensor_core.hpp:22`), `accelerator` is CPU/GPU/ReRAM-sim (`accelerator.hpp:226-242`). Documented `other.hpp` parity shims and default PQC wrappers as intentional stubs; test count corrected to `50/50` across `README.md`, `docs/` and CI step name.
 - **CI enforcement** — `lint` job is now blocking (`clang-tidy` warnings fail the build), new `clang-format --check` job enforces `.clang-format` (`ColumnLimit: 120`, 4-space), TSan keeps `NP_WERROR=ON` (warnings-as-errors stay on where races hide).
 - **Error handling (AGENTS.md §4)** — narrowed `datetime64_from_string` catch to `const std::exception&` with rethrow as `invalid_argument`; documented the `datetime_data` count fallback and the `cuda.hpp` `noexcept` cache fallback so no `catch (...)` silently swallows.
 

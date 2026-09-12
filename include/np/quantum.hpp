@@ -194,7 +194,7 @@ class StateVector : public IStateVector<c128>
             return outcome;
 
         for (size_t i = 0; i < amps.size(); ++i)
-            if (((i >> qubit) & 1) != outcome)
+            if (((i >> qubit) & 1) != static_cast<std::size_t>(outcome))
                 amps[i] = c128(0, 0);
             else
                 amps[i] = static_cast<c128>(amps[i]) / norm_factor;

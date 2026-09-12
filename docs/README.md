@@ -1,6 +1,6 @@
 # Docs — dev branch
 
-This folder is the **rewritten documentation for `dev`** (header-only, 760+ routines, 49/49 tests). `main`’s README is the stable user guide; here we document internals, micro-opts, and benchmarks introduced in `f7b2653..cf8f4a4`.
+This folder is the **rewritten documentation for `dev`** (header-only, 760+ routines, 50/50 tests). `main`’s README is the stable user guide; here we document internals, micro-opts, and benchmarks introduced in `f7b2653..cf8f4a4`.
 
 ## Index
 
