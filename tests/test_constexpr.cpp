@@ -6,8 +6,8 @@
  *        (std::sqrt/std::exp are not constexpr before C++26, so the math
  *        kernels are provided by np::detail::math.)
  */
-#include "np/np.hpp"
 #include "np/detail/math_constexpr.hpp"
+#include "np/np.hpp"
 
 namespace mce = np::detail::math;
 
@@ -62,9 +62,7 @@ static_assert(np::sin(np::ndarrayf<double, 1>{0.0}).eval()[0] == 0.0);
 static_assert(np::floor(np::ndarrayf<double, 1>{2.7}).eval()[0] == 2.0);
 
 // Joins
-static_assert(
-    np::concatenate(np::ndarrayf<int, 3>{0, 1, 2}, np::ndarrayf<int, 2>{0, 1}).size_v
-    == 5);
+static_assert(np::concatenate(np::ndarrayf<int, 3>{0, 1, 2}, np::ndarrayf<int, 2>{0, 1}).size_v == 5);
 static_assert(np::stack<0>(A, A)(1, 0, 1) == 2);
 static_assert(np::stack<2>(A, A)(0, 1, 1) == 2);
 
@@ -95,7 +93,7 @@ static_assert(np::linalg::matmul(M, N)(1, 0) == 49);
 // compared with a tolerance; the rest are exact.
 constexpr bool close(double a, double b)
 {
-  return a - b < 1e-9 && b - a < 1e-9;
+    return a - b < 1e-9 && b - a < 1e-9;
 }
 
 constexpr np::ndarrayf<int, 2, 2> SQ{{2, 0}, {0, 4}};
@@ -103,12 +101,9 @@ constexpr np::ndarrayf<int, 2, 2> G{{1, 2}, {3, 4}};
 static_assert(np::linalg::trace(SQ) == 6.0);
 static_assert(close(np::linalg::det(SQ), 8.0));
 static_assert(close(np::linalg::det(G), -2.0));
-static_assert(
-    np::linalg::slogdet(SQ).sign == 1.0
-    && close(np::linalg::slogdet(SQ).logabsdet, 2.0794415416798357));
-static_assert(
-    np::linalg::solve(SQ, np::ndarrayf<int, 2>{2, 4})[0] == 1.0
-    && np::linalg::solve(SQ, np::ndarrayf<int, 2>{2, 4})[1] == 1.0);
+static_assert(np::linalg::slogdet(SQ).sign == 1.0 && close(np::linalg::slogdet(SQ).logabsdet, 2.0794415416798357));
+static_assert(np::linalg::solve(SQ, np::ndarrayf<int, 2>{2, 4})[0] == 1.0 &&
+              np::linalg::solve(SQ, np::ndarrayf<int, 2>{2, 4})[1] == 1.0);
 static_assert(np::linalg::inv(SQ)(0, 0) == 0.5 && np::linalg::inv(SQ)(1, 1) == 0.25);
 static_assert(np::linalg::cholesky(SQ)(1, 1) == 2.0);
 static_assert(np::linalg::cholesky(SQ, true)(1, 1) == 2.0);
@@ -117,20 +112,11 @@ static_assert(np::linalg::matrix_power(G, 0)(0, 0) == 1.0);
 static_assert(close(np::linalg::matrix_power(G, -1)(1, 1), -0.5));
 
 static_assert(np::linalg::norm(np::ndarrayf<double, 2>{3, 4}) == 5.0);
-static_assert(
-    np::linalg::norm(np::ndarrayf<double, 4>{1, 2, 3, 4}, np::linalg::NormOrd::One)
-    == 10.0);
-static_assert(
-    np::linalg::norm(np::ndarrayf<double, 4>{1, 2, 3, 4}, np::linalg::NormOrd::Inf)
-    == 4.0);
-static_assert(close(
-    np::linalg::norm(np::ndarrayf<double, 4>{1, 2, 3, 4}, np::linalg::NormOrd::NegOne),
-    0.48));
-static_assert(
-    close(np::linalg::norm(np::ndarrayf<double, 2, 2>{{1, 0}, {0, 2}}), std::sqrt(5.0)));
-static_assert(
-    np::linalg::norm(np::ndarrayf<double, 2, 2>{{1, 0}, {0, 2}}, np::linalg::NormOrd::Nuc)
-    == 3.0);
+static_assert(np::linalg::norm(np::ndarrayf<double, 4>{1, 2, 3, 4}, np::linalg::NormOrd::One) == 10.0);
+static_assert(np::linalg::norm(np::ndarrayf<double, 4>{1, 2, 3, 4}, np::linalg::NormOrd::Inf) == 4.0);
+static_assert(close(np::linalg::norm(np::ndarrayf<double, 4>{1, 2, 3, 4}, np::linalg::NormOrd::NegOne), 0.48));
+static_assert(close(np::linalg::norm(np::ndarrayf<double, 2, 2>{{1, 0}, {0, 2}}), std::sqrt(5.0)));
+static_assert(np::linalg::norm(np::ndarrayf<double, 2, 2>{{1, 0}, {0, 2}}, np::linalg::NormOrd::Nuc) == 3.0);
 
 constexpr np::ndarrayf<double, 3, 2> R1{{1, 2}, {0, 0}, {0, 0}};
 static_assert(np::linalg::matrix_rank(R1) == 1);
@@ -149,24 +135,15 @@ constexpr auto SVDW = np::linalg::svd<false>(WIDE);
 static_assert(SVDW.vh.static_shape[0] == 2 && SVDW.vh.static_shape[1] == 3);
 static_assert(SVDW.s[0] == 2.0 && SVDW.s[1] == 1.0);
 
-constexpr auto EH =
-    np::linalg::eigh(np::ndarrayf<double, 3, 3>{{2, 0, 0}, {0, 3, 0}, {0, 0, 5}});
+constexpr auto EH = np::linalg::eigh(np::ndarrayf<double, 3, 3>{{2, 0, 0}, {0, 3, 0}, {0, 0, 5}});
 static_assert(EH.w[0] == 2.0 && EH.w[1] == 3.0 && EH.w[2] == 5.0);
 static_assert(np::linalg::eigvalsh(np::ndarrayf<double, 2, 2>{{1, 3}, {3, 4}})[1] > 5.0);
 
-static_assert(
-    np::linalg::cross(
-        np::ndarrayf<double, 3>{1, 0, 0}, np::ndarrayf<double, 3>{0, 1, 0})[2]
-    == 1.0);
-static_assert(
-    np::linalg::outer(np::ndarrayf<double, 2>{1, 2}, np::ndarrayf<double, 3>{3, 4, 5})(
-        1, 2)
-    == 10.0);
-static_assert(
-    np::linalg::inner(np::ndarrayf<double, 3>{1, 2, 3}, np::ndarrayf<double, 3>{4, 5, 6})
-    == 32.0);
-constexpr auto LS = np::linalg::lstsq(
-    np::ndarrayf<double, 3, 2>{{1, 0}, {0, 1}, {0, 0}}, np::ndarrayf<double, 3>{1, 2, 0});
+static_assert(np::linalg::cross(np::ndarrayf<double, 3>{1, 0, 0}, np::ndarrayf<double, 3>{0, 1, 0})[2] == 1.0);
+static_assert(np::linalg::outer(np::ndarrayf<double, 2>{1, 2}, np::ndarrayf<double, 3>{3, 4, 5})(1, 2) == 10.0);
+static_assert(np::linalg::inner(np::ndarrayf<double, 3>{1, 2, 3}, np::ndarrayf<double, 3>{4, 5, 6}) == 32.0);
+constexpr auto LS =
+    np::linalg::lstsq(np::ndarrayf<double, 3, 2>{{1, 0}, {0, 1}, {0, 0}}, np::ndarrayf<double, 3>{1, 2, 0});
 static_assert(LS.x[0] == 1.0 && LS.x[1] == 2.0 && LS.rank == 2);
 
 // constexpr math kernels (std::sqrt etc. are not constexpr until C++26)
@@ -189,5 +166,5 @@ static_assert(mce::pi_v > 3.1415926 && mce::pi_v < 3.1415927);
 
 int main()
 {
-  return 0;
+    return 0;
 }

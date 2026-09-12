@@ -1,0 +1,16 @@
+# LeakSanitizer suppressions for numpy-cpp's test suite.
+#
+# The NVIDIA driver/runtime libraries perform one-time internal allocations
+# on first use (cuInit and friends) that they intentionally never free.
+# These show up as LSan "direct leaks" attributed entirely to
+# libcuda/libcudart/libcublas/libcufft frames — third-party noise, not
+# library code. Without these suppressions, any ASan+LSan run on a machine
+# with an NVIDIA driver fails at exit even when every test assertion passes
+# and no np:: frame leaks anything.
+#
+# Wired in from tests/CMakeLists.txt via LSAN_OPTIONS; harmless when
+# sanitizers are off (LSan never reads this file then).
+leak:libcuda.so*
+leak:libcudart.so*
+leak:libcublas.so*
+leak:libcufft.so*

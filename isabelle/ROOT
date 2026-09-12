@@ -1,0 +1,11 @@
+session NumpyCpp = HOL +
+  options [timeout = 300]
+  theories
+    Dual_Verification
+    Differential_Verification
+    Lattice_Verification
+    Padic_Verification
+    Hardware_Verification
+    Spectral_Verification
+  document_files
+    "root.tex"

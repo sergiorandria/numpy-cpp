@@ -1,0 +1,21 @@
+\documentclass[11pt,a4paper]{article}
+\usepackage{isabelle,isabellesym}
+\usepackage{pdfsetup}
+\urlstyle{rm}
+\isabellestyle{it}
+\begin{document}
+\title{NumpyCpp Verification with Isabelle/HOL}
+\author{Sergio Randriamihoatra / Muse Spark}
+\maketitle
+\begin{abstract}
+Formal verification of \texttt{numpy-cpp} differential and lattice kernels
+using Isabelle/HOL. Theories \texttt{Dual\_Verification}, \texttt{Differential\_Verification},
+\texttt{Lattice\_Verification} correspond to \texttt{include/np/differential.hpp}
+and \texttt{include/np/lattice.hpp} and prove key properties: Dual forward AD
+correctness, exterior derivative nilpotency, symbolic differentiation, lattice
+meet/join laws, dual involution, LLL invariants, and factory correctness.
+\end{abstract}
+\tableofcontents
+\parindent 0pt \parskip 0.5ex
+\input{session}
+\end{document}

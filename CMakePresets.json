@@ -1,0 +1,76 @@
+{
+  "version": 3,
+  "configurePresets": [
+    {
+      "name": "dev",
+      "displayName": "dev (debug, fast configure)",
+      "generator": "Ninja",
+      "binaryDir": "${sourceDir}/build",
+      "cacheVariables": {
+        "CMAKE_BUILD_TYPE": "Debug",
+        "BUILD_TESTING": "ON"
+      }
+    },
+    {
+      "name": "release",
+      "displayName": "release (O3, no GPU)",
+      "generator": "Ninja",
+      "binaryDir": "${sourceDir}/build",
+      "cacheVariables": {
+        "CMAKE_BUILD_TYPE": "Release",
+        "BUILD_TESTING": "ON",
+        "NP_ENABLE_O3": "ON",
+        "NP_ENABLE_NATIVE": "OFF",
+        "NP_ENABLE_LTO": "OFF"
+      }
+    },
+    {
+      "name": "powerful",
+      "displayName": "powerful workstation + GPU (i7/GTX1650+, AVX2, OpenMP, GPU, LTO, native, threading)",
+      "description": "For very powerful computer + graphics card: AVX2 FMA, OpenMP target offload, CUDA driver dlopen, ThreadPool, LTO, -march=native, 12-thread blocked GEMM. No CUDA toolkit required; falls back to CPU when no GPU driver. Use: cmake --preset powerful && cmake --build --preset powerful -j$(nproc) && ctest --preset powerful",
+      "generator": "Ninja",
+      "binaryDir": "${sourceDir}/build",
+      "cacheVariables": {
+        "CMAKE_BUILD_TYPE": "Release",
+        "BUILD_TESTING": "ON",
+        "NP_ENABLE_POWERFUL": "ON",
+        "NP_ENABLE_AVX2": "ON",
+        "NP_ENABLE_GPU": "ON",
+        "NP_ENABLE_OPENMP": "ON",
+        "NP_USE_THREADING": "ON",
+        "NP_ENABLE_LTO": "ON",
+        "NP_ENABLE_NATIVE": "ON",
+        "NP_ENABLE_O3": "ON",
+        "NP_ENABLE_SIMD": "ON",
+        "NP_ENABLE_FAST_MATH": "OFF"
+      }
+    },
+    {
+      "name": "powerful-fastmath",
+      "displayName": "powerful + fast-math (may affect NaN/inf)",
+      "inherits": "powerful",
+      "cacheVariables": {
+        "NP_ENABLE_FAST_MATH": "ON"
+      }
+    }
+  ],
+  "buildPresets": [
+    {
+      "name": "powerful",
+      "configurePreset": "powerful",
+      "jobs": 0
+    }
+  ],
+  "testPresets": [
+    {
+      "name": "powerful",
+      "configurePreset": "powerful",
+      "output": {
+        "outputOnFailure": true
+      },
+      "execution": {
+        "jobs": 0
+      }
+    }
+  ]
+}

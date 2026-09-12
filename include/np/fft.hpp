@@ -17,9 +17,39 @@
 #ifndef NP_FFT_HPP
 #define NP_FFT_HPP
 
-#include "fft/fft_core.hpp"
+#include "api_macros.hpp"
 #include "fft/fft_1d.hpp"
+#include "fft/fft_core.hpp"
 #include "fft/fft_nd.hpp"
 #include "fft/fft_shift.hpp"
+#include "pqc.hpp"
+
+namespace np::fft::secure
+{
+template <typename... Args> NP_NODISCARD inline auto fft(Args &&...args)
+{
+    auto r = ::np::fft::fft(std::forward<Args>(args)...);
+    pqc::ct_barrier();
+    return r;
+}
+template <typename... Args> NP_NODISCARD inline auto ifft(Args &&...args)
+{
+    auto r = ::np::fft::ifft(std::forward<Args>(args)...);
+    pqc::ct_barrier();
+    return r;
+}
+template <typename... Args> NP_NODISCARD inline auto rfft(Args &&...args)
+{
+    auto r = ::np::fft::rfft(std::forward<Args>(args)...);
+    pqc::ct_barrier();
+    return r;
+}
+template <typename... Args> NP_NODISCARD inline auto fftn(Args &&...args)
+{
+    auto r = ::np::fft::fftn(std::forward<Args>(args)...);
+    pqc::ct_barrier();
+    return r;
+}
+} // namespace np::fft::secure
 
 #endif // NP_FFT_HPP

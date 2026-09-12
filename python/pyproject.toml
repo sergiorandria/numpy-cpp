@@ -1,0 +1,23 @@
+[build-system]
+requires = ["setuptools>=61", "pybind11>=2.11", "cmake>=3.20"]
+build-backend = "setuptools.build_meta"
+
+[project]
+name = "numpy-cpp"
+version = "1.0.0"
+description = "numpy-cpp Python bridge — header-only C++20 NumPy 1.0 — production ready"
+readme = "README.md"
+requires-python = ">=3.8"
+license = {text = "BSD-3-Clause"}
+authors = [{name = "Sergio Randriamihoatra", email = "sergiorandriamihoatra@gmail.com"}]
+keywords = ["numpy", "c++20", "header-only", "simd", "lattice", "padic", "neuromorphic", "hbm", "tensor-core", "isabelle"]
+
+[project.urls]
+Homepage = "https://github.com/sergiorandria/numpy-cpp"
+Repository = "https://github.com/sergiorandria/numpy-cpp.git"
+
+[tool.setuptools]
+packages = []
+
+[tool.setuptools.package-data]
+"*" = ["*.so"]
