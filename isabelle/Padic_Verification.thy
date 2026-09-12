@@ -257,6 +257,7 @@ lemma padic_norm_unit_one: "is_padic_unit p (int x) ==> padic_norm p x = 1"
   sorry
 
 lemma padic_differential_exterior: "(x::nat) ~= 0 ==> p > 1 ==> padic_valuation_fun p (p * x) = Suc (padic_valuation_fun p x)"
-  sorry
+  sorry (* TODO: unfolding with (p*x) conditions; needs p*x~=0 via mult_eq_0_iff
+           plus div-cancel; simp loops on recursive simps. *)
 
 end
