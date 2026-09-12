@@ -382,6 +382,15 @@ NP_API template <detail::Numeric T> auto cos(const ndarray<T> &x, ndarray<T> &ou
  */
 NP_API template <detail::Numeric T> NP_NODISCARD auto tan(const ndarray<T> &x) -> ndarray<T>
 {
+    if constexpr (std::is_same_v<T, float> || std::is_same_v<T, double>)
+    {
+        if (x.is_contiguous())
+        {
+            ndarray<T> out(x.shape);
+            simd::tan_vectorized(x.data().data(), out.data().data(), x.size());
+            return out;
+        }
+    }
     return detail::ufunc_unary(x, [](const T &v) { return std::tan(v); });
 }
 
@@ -389,6 +398,14 @@ NP_API template <detail::Numeric T> NP_NODISCARD auto tan(const ndarray<T> &x) -
  * @throws std::invalid_argument if `out.shape` differs from `x.shape`. */
 NP_API template <detail::Numeric T> auto tan(const ndarray<T> &x, ndarray<T> &out) -> ndarray<T> &
 {
+    if constexpr (std::is_same_v<T, float> || std::is_same_v<T, double>)
+    {
+        if (x.is_contiguous() && out.is_contiguous() && x.shape == out.shape)
+        {
+            simd::tan_vectorized(x.data().data(), out.data().data(), x.size());
+            return out;
+        }
+    }
     return detail::ufunc_unary_into(x, out, [](const T &v) { return std::tan(v); });
 }
 
@@ -403,6 +420,15 @@ NP_API template <detail::Numeric T> auto tan(const ndarray<T> &x, ndarray<T> &ou
  */
 NP_API template <detail::Numeric T> NP_NODISCARD auto arcsin(const ndarray<T> &x) -> ndarray<T>
 {
+    if constexpr (std::is_same_v<T, float> || std::is_same_v<T, double>)
+    {
+        if (x.is_contiguous())
+        {
+            ndarray<T> out(x.shape);
+            simd::asin_vectorized(x.data().data(), out.data().data(), x.size());
+            return out;
+        }
+    }
     return detail::ufunc_unary(x, [](const T &v) { return std::asin(v); });
 }
 
@@ -410,6 +436,14 @@ NP_API template <detail::Numeric T> NP_NODISCARD auto arcsin(const ndarray<T> &x
  * @throws std::invalid_argument if `out.shape` differs from `x.shape`. */
 NP_API template <detail::Numeric T> auto arcsin(const ndarray<T> &x, ndarray<T> &out) -> ndarray<T> &
 {
+    if constexpr (std::is_same_v<T, float> || std::is_same_v<T, double>)
+    {
+        if (x.is_contiguous() && out.is_contiguous() && x.shape == out.shape)
+        {
+            simd::asin_vectorized(x.data().data(), out.data().data(), x.size());
+            return out;
+        }
+    }
     return detail::ufunc_unary_into(x, out, [](const T &v) { return std::asin(v); });
 }
 
@@ -424,6 +458,15 @@ NP_API template <detail::Numeric T> auto arcsin(const ndarray<T> &x, ndarray<T> 
  */
 NP_API template <detail::Numeric T> NP_NODISCARD auto arccos(const ndarray<T> &x) -> ndarray<T>
 {
+    if constexpr (std::is_same_v<T, float> || std::is_same_v<T, double>)
+    {
+        if (x.is_contiguous())
+        {
+            ndarray<T> out(x.shape);
+            simd::acos_vectorized(x.data().data(), out.data().data(), x.size());
+            return out;
+        }
+    }
     return detail::ufunc_unary(x, [](const T &v) { return std::acos(v); });
 }
 
@@ -431,6 +474,14 @@ NP_API template <detail::Numeric T> NP_NODISCARD auto arccos(const ndarray<T> &x
  * @throws std::invalid_argument if `out.shape` differs from `x.shape`. */
 NP_API template <detail::Numeric T> auto arccos(const ndarray<T> &x, ndarray<T> &out) -> ndarray<T> &
 {
+    if constexpr (std::is_same_v<T, float> || std::is_same_v<T, double>)
+    {
+        if (x.is_contiguous() && out.is_contiguous() && x.shape == out.shape)
+        {
+            simd::acos_vectorized(x.data().data(), out.data().data(), x.size());
+            return out;
+        }
+    }
     return detail::ufunc_unary_into(x, out, [](const T &v) { return std::acos(v); });
 }
 
@@ -444,6 +495,15 @@ NP_API template <detail::Numeric T> auto arccos(const ndarray<T> &x, ndarray<T> 
  */
 NP_API template <detail::Numeric T> NP_NODISCARD auto arctan(const ndarray<T> &x) -> ndarray<T>
 {
+    if constexpr (std::is_same_v<T, float> || std::is_same_v<T, double>)
+    {
+        if (x.is_contiguous())
+        {
+            ndarray<T> out(x.shape);
+            simd::atan_vectorized(x.data().data(), out.data().data(), x.size());
+            return out;
+        }
+    }
     return detail::ufunc_unary(x, [](const T &v) { return std::atan(v); });
 }
 
@@ -451,6 +511,14 @@ NP_API template <detail::Numeric T> NP_NODISCARD auto arctan(const ndarray<T> &x
  * @throws std::invalid_argument if `out.shape` differs from `x.shape`. */
 NP_API template <detail::Numeric T> auto arctan(const ndarray<T> &x, ndarray<T> &out) -> ndarray<T> &
 {
+    if constexpr (std::is_same_v<T, float> || std::is_same_v<T, double>)
+    {
+        if (x.is_contiguous() && out.is_contiguous() && x.shape == out.shape)
+        {
+            simd::atan_vectorized(x.data().data(), out.data().data(), x.size());
+            return out;
+        }
+    }
     return detail::ufunc_unary_into(x, out, [](const T &v) { return std::atan(v); });
 }
 
@@ -469,6 +537,18 @@ NP_API template <detail::Arithmetic T, detail::Arithmetic U>
 NP_NODISCARD auto arctan2(const ndarray<T> &x1, const ndarray<U> &x2) -> ndarray<std::common_type_t<T, U>>
 {
     using R = std::common_type_t<T, U>;
+    if constexpr (std::is_same_v<T, U> && (std::is_same_v<T, float> || std::is_same_v<T, double>))
+    {
+        if (x1.is_contiguous() && x2.is_contiguous() && x1.shape == x2.shape)
+        {
+            ndarray<R> result(x1.shape, dtype_of<R>);
+            if (result.size() > 0)
+            {
+                np::simd::atan2_vectorized(x1.data().data(), x2.data().data(), result.data().data(), result.size());
+            }
+            return result;
+        }
+    }
     return detail::elementwise(x1, x2, [](const T &y, const U &x) { return static_cast<R>(std::atan2(y, x)); });
 }
 
@@ -480,6 +560,18 @@ auto arctan2(const ndarray<T> &x1, const ndarray<U> &x2, ndarray<std::common_typ
     -> ndarray<std::common_type_t<T, U>> &
 {
     using R = std::common_type_t<T, U>;
+    if constexpr (std::is_same_v<T, U> && (std::is_same_v<T, float> || std::is_same_v<T, double>))
+    {
+        if (x1.is_contiguous() && x2.is_contiguous() && out.is_contiguous() && out.shape == x1.shape &&
+            x1.shape == x2.shape)
+        {
+            if (out.size() > 0)
+            {
+                np::simd::atan2_vectorized(x1.data().data(), x2.data().data(), out.data().data(), out.size());
+            }
+            return out;
+        }
+    }
     return detail::elementwise_into(x1, x2, out,
                                     [](const T &y, const U &x) { return static_cast<R>(std::atan2(y, x)); });
 }
@@ -498,6 +590,18 @@ NP_API template <detail::Arithmetic T, detail::Arithmetic U>
 NP_NODISCARD auto hypot(const ndarray<T> &x1, const ndarray<U> &x2) -> ndarray<std::common_type_t<T, U>>
 {
     using R = std::common_type_t<T, U>;
+    if constexpr (std::is_same_v<T, U> && (std::is_same_v<T, float> || std::is_same_v<T, double>))
+    {
+        if (x1.is_contiguous() && x2.is_contiguous() && x1.shape == x2.shape)
+        {
+            ndarray<R> result(x1.shape, dtype_of<R>);
+            if (result.size() > 0)
+            {
+                np::simd::hypot_vectorized(x1.data().data(), x2.data().data(), result.data().data(), result.size());
+            }
+            return result;
+        }
+    }
     return detail::elementwise(x1, x2, [](const T &a, const U &b) { return static_cast<R>(std::hypot(a, b)); });
 }
 
@@ -509,6 +613,18 @@ auto hypot(const ndarray<T> &x1, const ndarray<U> &x2, ndarray<std::common_type_
     -> ndarray<std::common_type_t<T, U>> &
 {
     using R = std::common_type_t<T, U>;
+    if constexpr (std::is_same_v<T, U> && (std::is_same_v<T, float> || std::is_same_v<T, double>))
+    {
+        if (x1.is_contiguous() && x2.is_contiguous() && out.is_contiguous() && out.shape == x1.shape &&
+            x1.shape == x2.shape)
+        {
+            if (out.size() > 0)
+            {
+                np::simd::hypot_vectorized(x1.data().data(), x2.data().data(), out.data().data(), out.size());
+            }
+            return out;
+        }
+    }
     return detail::elementwise_into(x1, x2, out,
                                     [](const T &a, const U &b) { return static_cast<R>(std::hypot(a, b)); });
 }
@@ -591,6 +707,15 @@ NP_API template <detail::FloatingPoint T> auto deg2rad(const ndarray<T> &x, ndar
  */
 NP_API template <detail::Numeric T> NP_NODISCARD auto sinh(const ndarray<T> &x) -> ndarray<T>
 {
+    if constexpr (std::is_same_v<T, float> || std::is_same_v<T, double>)
+    {
+        if (x.is_contiguous())
+        {
+            ndarray<T> out(x.shape);
+            simd::sinh_vectorized(x.data().data(), out.data().data(), x.size());
+            return out;
+        }
+    }
     return detail::ufunc_unary(x, [](const T &v) { return std::sinh(v); });
 }
 
@@ -598,6 +723,14 @@ NP_API template <detail::Numeric T> NP_NODISCARD auto sinh(const ndarray<T> &x) 
  * @throws std::invalid_argument if `out.shape` differs from `x.shape`. */
 NP_API template <detail::Numeric T> auto sinh(const ndarray<T> &x, ndarray<T> &out) -> ndarray<T> &
 {
+    if constexpr (std::is_same_v<T, float> || std::is_same_v<T, double>)
+    {
+        if (x.is_contiguous() && out.is_contiguous() && x.shape == out.shape)
+        {
+            simd::sinh_vectorized(x.data().data(), out.data().data(), x.size());
+            return out;
+        }
+    }
     return detail::ufunc_unary_into(x, out, [](const T &v) { return std::sinh(v); });
 }
 
@@ -609,6 +742,15 @@ NP_API template <detail::Numeric T> auto sinh(const ndarray<T> &x, ndarray<T> &o
  */
 NP_API template <detail::Numeric T> NP_NODISCARD auto cosh(const ndarray<T> &x) -> ndarray<T>
 {
+    if constexpr (std::is_same_v<T, float> || std::is_same_v<T, double>)
+    {
+        if (x.is_contiguous())
+        {
+            ndarray<T> out(x.shape);
+            simd::cosh_vectorized(x.data().data(), out.data().data(), x.size());
+            return out;
+        }
+    }
     return detail::ufunc_unary(x, [](const T &v) { return std::cosh(v); });
 }
 
@@ -616,6 +758,14 @@ NP_API template <detail::Numeric T> NP_NODISCARD auto cosh(const ndarray<T> &x) 
  * @throws std::invalid_argument if `out.shape` differs from `x.shape`. */
 NP_API template <detail::Numeric T> auto cosh(const ndarray<T> &x, ndarray<T> &out) -> ndarray<T> &
 {
+    if constexpr (std::is_same_v<T, float> || std::is_same_v<T, double>)
+    {
+        if (x.is_contiguous() && out.is_contiguous() && x.shape == out.shape)
+        {
+            simd::cosh_vectorized(x.data().data(), out.data().data(), x.size());
+            return out;
+        }
+    }
     return detail::ufunc_unary_into(x, out, [](const T &v) { return std::cosh(v); });
 }
 
@@ -627,6 +777,15 @@ NP_API template <detail::Numeric T> auto cosh(const ndarray<T> &x, ndarray<T> &o
  */
 NP_API template <detail::Numeric T> NP_NODISCARD auto tanh(const ndarray<T> &x) -> ndarray<T>
 {
+    if constexpr (std::is_same_v<T, float> || std::is_same_v<T, double>)
+    {
+        if (x.is_contiguous())
+        {
+            ndarray<T> out(x.shape);
+            simd::tanh_vectorized(x.data().data(), out.data().data(), x.size());
+            return out;
+        }
+    }
     return detail::ufunc_unary(x, [](const T &v) { return std::tanh(v); });
 }
 
@@ -634,6 +793,14 @@ NP_API template <detail::Numeric T> NP_NODISCARD auto tanh(const ndarray<T> &x) 
  * @throws std::invalid_argument if `out.shape` differs from `x.shape`. */
 NP_API template <detail::Numeric T> auto tanh(const ndarray<T> &x, ndarray<T> &out) -> ndarray<T> &
 {
+    if constexpr (std::is_same_v<T, float> || std::is_same_v<T, double>)
+    {
+        if (x.is_contiguous() && out.is_contiguous() && x.shape == out.shape)
+        {
+            simd::tanh_vectorized(x.data().data(), out.data().data(), x.size());
+            return out;
+        }
+    }
     return detail::ufunc_unary_into(x, out, [](const T &v) { return std::tanh(v); });
 }
 
@@ -645,6 +812,15 @@ NP_API template <detail::Numeric T> auto tanh(const ndarray<T> &x, ndarray<T> &o
  */
 NP_API template <detail::Numeric T> NP_NODISCARD auto arcsinh(const ndarray<T> &x) -> ndarray<T>
 {
+    if constexpr (std::is_same_v<T, float> || std::is_same_v<T, double>)
+    {
+        if (x.is_contiguous())
+        {
+            ndarray<T> out(x.shape);
+            simd::asinh_vectorized(x.data().data(), out.data().data(), x.size());
+            return out;
+        }
+    }
     return detail::ufunc_unary(x, [](const T &v) { return std::asinh(v); });
 }
 
@@ -652,6 +828,14 @@ NP_API template <detail::Numeric T> NP_NODISCARD auto arcsinh(const ndarray<T> &
  * @throws std::invalid_argument if `out.shape` differs from `x.shape`. */
 NP_API template <detail::Numeric T> auto arcsinh(const ndarray<T> &x, ndarray<T> &out) -> ndarray<T> &
 {
+    if constexpr (std::is_same_v<T, float> || std::is_same_v<T, double>)
+    {
+        if (x.is_contiguous() && out.is_contiguous() && x.shape == out.shape)
+        {
+            simd::asinh_vectorized(x.data().data(), out.data().data(), x.size());
+            return out;
+        }
+    }
     return detail::ufunc_unary_into(x, out, [](const T &v) { return std::asinh(v); });
 }
 
@@ -665,6 +849,15 @@ NP_API template <detail::Numeric T> auto arcsinh(const ndarray<T> &x, ndarray<T>
  */
 NP_API template <detail::Numeric T> NP_NODISCARD auto arccosh(const ndarray<T> &x) -> ndarray<T>
 {
+    if constexpr (std::is_same_v<T, float> || std::is_same_v<T, double>)
+    {
+        if (x.is_contiguous())
+        {
+            ndarray<T> out(x.shape);
+            simd::acosh_vectorized(x.data().data(), out.data().data(), x.size());
+            return out;
+        }
+    }
     return detail::ufunc_unary(x, [](const T &v) { return std::acosh(v); });
 }
 
@@ -672,6 +865,14 @@ NP_API template <detail::Numeric T> NP_NODISCARD auto arccosh(const ndarray<T> &
  * @throws std::invalid_argument if `out.shape` differs from `x.shape`. */
 NP_API template <detail::Numeric T> auto arccosh(const ndarray<T> &x, ndarray<T> &out) -> ndarray<T> &
 {
+    if constexpr (std::is_same_v<T, float> || std::is_same_v<T, double>)
+    {
+        if (x.is_contiguous() && out.is_contiguous() && x.shape == out.shape)
+        {
+            simd::acosh_vectorized(x.data().data(), out.data().data(), x.size());
+            return out;
+        }
+    }
     return detail::ufunc_unary_into(x, out, [](const T &v) { return std::acosh(v); });
 }
 
@@ -685,6 +886,15 @@ NP_API template <detail::Numeric T> auto arccosh(const ndarray<T> &x, ndarray<T>
  */
 NP_API template <detail::Numeric T> NP_NODISCARD auto arctanh(const ndarray<T> &x) -> ndarray<T>
 {
+    if constexpr (std::is_same_v<T, float> || std::is_same_v<T, double>)
+    {
+        if (x.is_contiguous())
+        {
+            ndarray<T> out(x.shape);
+            simd::atanh_vectorized(x.data().data(), out.data().data(), x.size());
+            return out;
+        }
+    }
     return detail::ufunc_unary(x, [](const T &v) { return std::atanh(v); });
 }
 
@@ -692,6 +902,14 @@ NP_API template <detail::Numeric T> NP_NODISCARD auto arctanh(const ndarray<T> &
  * @throws std::invalid_argument if `out.shape` differs from `x.shape`. */
 NP_API template <detail::Numeric T> auto arctanh(const ndarray<T> &x, ndarray<T> &out) -> ndarray<T> &
 {
+    if constexpr (std::is_same_v<T, float> || std::is_same_v<T, double>)
+    {
+        if (x.is_contiguous() && out.is_contiguous() && x.shape == out.shape)
+        {
+            simd::atanh_vectorized(x.data().data(), out.data().data(), x.size());
+            return out;
+        }
+    }
     return detail::ufunc_unary_into(x, out, [](const T &v) { return std::atanh(v); });
 }
 
@@ -742,6 +960,15 @@ NP_API template <detail::Numeric T> auto exp(const ndarray<T> &x, ndarray<T> &ou
  */
 NP_API template <detail::FloatingPoint T> NP_NODISCARD auto expm1(const ndarray<T> &x) -> ndarray<T>
 {
+    if constexpr (std::is_same_v<T, float> || std::is_same_v<T, double>)
+    {
+        if (x.is_contiguous())
+        {
+            ndarray<T> out(x.shape);
+            simd::expm1_vectorized(x.data().data(), out.data().data(), x.size());
+            return out;
+        }
+    }
     return detail::ufunc_unary(x, [](const T &v) { return std::expm1(v); });
 }
 
@@ -749,6 +976,14 @@ NP_API template <detail::FloatingPoint T> NP_NODISCARD auto expm1(const ndarray<
  * @throws std::invalid_argument if `out.shape` differs from `x.shape`. */
 NP_API template <detail::FloatingPoint T> auto expm1(const ndarray<T> &x, ndarray<T> &out) -> ndarray<T> &
 {
+    if constexpr (std::is_same_v<T, float> || std::is_same_v<T, double>)
+    {
+        if (x.is_contiguous() && out.is_contiguous() && x.shape == out.shape)
+        {
+            simd::expm1_vectorized(x.data().data(), out.data().data(), x.size());
+            return out;
+        }
+    }
     return detail::ufunc_unary_into(x, out, [](const T &v) { return std::expm1(v); });
 }
 
@@ -760,6 +995,15 @@ NP_API template <detail::FloatingPoint T> auto expm1(const ndarray<T> &x, ndarra
  */
 NP_API template <detail::FloatingPoint T> NP_NODISCARD auto exp2(const ndarray<T> &x) -> ndarray<T>
 {
+    if constexpr (std::is_same_v<T, float> || std::is_same_v<T, double>)
+    {
+        if (x.is_contiguous())
+        {
+            ndarray<T> out(x.shape);
+            simd::exp2_vectorized(x.data().data(), out.data().data(), x.size());
+            return out;
+        }
+    }
     return detail::ufunc_unary(x, [](const T &v) { return std::exp2(v); });
 }
 
@@ -767,6 +1011,14 @@ NP_API template <detail::FloatingPoint T> NP_NODISCARD auto exp2(const ndarray<T
  * @throws std::invalid_argument if `out.shape` differs from `x.shape`. */
 NP_API template <detail::FloatingPoint T> auto exp2(const ndarray<T> &x, ndarray<T> &out) -> ndarray<T> &
 {
+    if constexpr (std::is_same_v<T, float> || std::is_same_v<T, double>)
+    {
+        if (x.is_contiguous() && out.is_contiguous() && x.shape == out.shape)
+        {
+            simd::exp2_vectorized(x.data().data(), out.data().data(), x.size());
+            return out;
+        }
+    }
     return detail::ufunc_unary_into(x, out, [](const T &v) { return std::exp2(v); });
 }
 
@@ -815,6 +1067,15 @@ NP_API template <detail::Numeric T> auto log(const ndarray<T> &x, ndarray<T> &ou
  */
 NP_API template <detail::Numeric T> NP_NODISCARD auto log10(const ndarray<T> &x) -> ndarray<T>
 {
+    if constexpr (std::is_same_v<T, float> || std::is_same_v<T, double>)
+    {
+        if (x.is_contiguous())
+        {
+            ndarray<T> out(x.shape);
+            simd::log10_vectorized(x.data().data(), out.data().data(), x.size());
+            return out;
+        }
+    }
     return detail::ufunc_unary(x, [](const T &v) { return std::log10(v); });
 }
 
@@ -822,6 +1083,14 @@ NP_API template <detail::Numeric T> NP_NODISCARD auto log10(const ndarray<T> &x)
  * @throws std::invalid_argument if `out.shape` differs from `x.shape`. */
 NP_API template <detail::Numeric T> auto log10(const ndarray<T> &x, ndarray<T> &out) -> ndarray<T> &
 {
+    if constexpr (std::is_same_v<T, float> || std::is_same_v<T, double>)
+    {
+        if (x.is_contiguous() && out.is_contiguous() && x.shape == out.shape)
+        {
+            simd::log10_vectorized(x.data().data(), out.data().data(), x.size());
+            return out;
+        }
+    }
     return detail::ufunc_unary_into(x, out, [](const T &v) { return std::log10(v); });
 }
 
@@ -833,6 +1102,15 @@ NP_API template <detail::Numeric T> auto log10(const ndarray<T> &x, ndarray<T> &
  */
 NP_API template <detail::FloatingPoint T> NP_NODISCARD auto log2(const ndarray<T> &x) -> ndarray<T>
 {
+    if constexpr (std::is_same_v<T, float> || std::is_same_v<T, double>)
+    {
+        if (x.is_contiguous())
+        {
+            ndarray<T> out(x.shape);
+            simd::log2_vectorized(x.data().data(), out.data().data(), x.size());
+            return out;
+        }
+    }
     return detail::ufunc_unary(x, [](const T &v) { return std::log2(v); });
 }
 
@@ -840,6 +1118,14 @@ NP_API template <detail::FloatingPoint T> NP_NODISCARD auto log2(const ndarray<T
  * @throws std::invalid_argument if `out.shape` differs from `x.shape`. */
 NP_API template <detail::FloatingPoint T> auto log2(const ndarray<T> &x, ndarray<T> &out) -> ndarray<T> &
 {
+    if constexpr (std::is_same_v<T, float> || std::is_same_v<T, double>)
+    {
+        if (x.is_contiguous() && out.is_contiguous() && x.shape == out.shape)
+        {
+            simd::log2_vectorized(x.data().data(), out.data().data(), x.size());
+            return out;
+        }
+    }
     return detail::ufunc_unary_into(x, out, [](const T &v) { return std::log2(v); });
 }
 
@@ -853,6 +1139,15 @@ NP_API template <detail::FloatingPoint T> auto log2(const ndarray<T> &x, ndarray
  */
 NP_API template <detail::FloatingPoint T> NP_NODISCARD auto log1p(const ndarray<T> &x) -> ndarray<T>
 {
+    if constexpr (std::is_same_v<T, float> || std::is_same_v<T, double>)
+    {
+        if (x.is_contiguous())
+        {
+            ndarray<T> out(x.shape);
+            simd::log1p_vectorized(x.data().data(), out.data().data(), x.size());
+            return out;
+        }
+    }
     return detail::ufunc_unary(x, [](const T &v) { return std::log1p(v); });
 }
 
@@ -860,6 +1155,14 @@ NP_API template <detail::FloatingPoint T> NP_NODISCARD auto log1p(const ndarray<
  * @throws std::invalid_argument if `out.shape` differs from `x.shape`. */
 NP_API template <detail::FloatingPoint T> auto log1p(const ndarray<T> &x, ndarray<T> &out) -> ndarray<T> &
 {
+    if constexpr (std::is_same_v<T, float> || std::is_same_v<T, double>)
+    {
+        if (x.is_contiguous() && out.is_contiguous() && x.shape == out.shape)
+        {
+            simd::log1p_vectorized(x.data().data(), out.data().data(), x.size());
+            return out;
+        }
+    }
     return detail::ufunc_unary_into(x, out, [](const T &v) { return std::log1p(v); });
 }
 
@@ -874,6 +1177,15 @@ NP_API template <detail::FloatingPoint T> auto log1p(const ndarray<T> &x, ndarra
  */
 NP_API template <detail::Numeric T> NP_NODISCARD auto sqrt(const ndarray<T> &x) -> ndarray<T>
 {
+    if constexpr (std::is_same_v<T, float> || std::is_same_v<T, double>)
+    {
+        if (x.is_contiguous())
+        {
+            ndarray<T> out(x.shape);
+            simd::sqrt_vectorized(x.data().data(), out.data().data(), x.size());
+            return out;
+        }
+    }
     return detail::ufunc_unary(x, [](const T &v) { return std::sqrt(v); });
 }
 
@@ -881,6 +1193,14 @@ NP_API template <detail::Numeric T> NP_NODISCARD auto sqrt(const ndarray<T> &x) 
  * @throws std::invalid_argument if `out.shape` differs from `x.shape`. */
 NP_API template <detail::Numeric T> auto sqrt(const ndarray<T> &x, ndarray<T> &out) -> ndarray<T> &
 {
+    if constexpr (std::is_same_v<T, float> || std::is_same_v<T, double>)
+    {
+        if (x.is_contiguous() && out.is_contiguous() && x.shape == out.shape)
+        {
+            simd::sqrt_vectorized(x.data().data(), out.data().data(), x.size());
+            return out;
+        }
+    }
     return detail::ufunc_unary_into(x, out, [](const T &v) { return std::sqrt(v); });
 }
 
@@ -895,6 +1215,15 @@ NP_API template <detail::Numeric T> auto sqrt(const ndarray<T> &x, ndarray<T> &o
  */
 NP_API template <detail::FloatingPoint T> NP_NODISCARD auto cbrt(const ndarray<T> &x) -> ndarray<T>
 {
+    if constexpr (std::is_same_v<T, float> || std::is_same_v<T, double>)
+    {
+        if (x.is_contiguous())
+        {
+            ndarray<T> out(x.shape);
+            simd::cbrt_vectorized(x.data().data(), out.data().data(), x.size());
+            return out;
+        }
+    }
     return detail::ufunc_unary(x, [](const T &v) { return std::cbrt(v); });
 }
 
@@ -902,6 +1231,14 @@ NP_API template <detail::FloatingPoint T> NP_NODISCARD auto cbrt(const ndarray<T
  * @throws std::invalid_argument if `out.shape` differs from `x.shape`. */
 NP_API template <detail::FloatingPoint T> auto cbrt(const ndarray<T> &x, ndarray<T> &out) -> ndarray<T> &
 {
+    if constexpr (std::is_same_v<T, float> || std::is_same_v<T, double>)
+    {
+        if (x.is_contiguous() && out.is_contiguous() && x.shape == out.shape)
+        {
+            simd::cbrt_vectorized(x.data().data(), out.data().data(), x.size());
+            return out;
+        }
+    }
     return detail::ufunc_unary_into(x, out, [](const T &v) { return std::cbrt(v); });
 }
 
@@ -919,9 +1256,8 @@ NP_API template <detail::Numeric T> NP_NODISCARD auto square(const ndarray<T> &x
 {
     if constexpr (std::is_same_v<T, float> || std::is_same_v<T, double>)
     {
-        // NOTE: transcendental ufuncs (sin, exp, log, ...) are deliberately NOT
-        // vectorized here; they would require a vector math library
-        // (SLEEF/SVML, see NP_ENABLE_SLEEF). Only multiplication/division
+        // Transcendental ufuncs (sin, cos, tan, exp, log, ...) are vectorized
+        // through np::vecmath (see vecmath.hpp); only multiplication/division
         // have kernels in np::simd, so square/divide are the SIMD fast paths.
         if (x.is_contiguous())
         {
@@ -972,6 +1308,18 @@ NP_API template <detail::Numeric T, detail::Numeric U>
 NP_NODISCARD auto power(const ndarray<T> &x1, const ndarray<U> &x2) -> ndarray<std::common_type_t<T, U>>
 {
     using R = std::common_type_t<T, U>;
+    if constexpr (std::is_same_v<T, U> && (std::is_same_v<T, float> || std::is_same_v<T, double>))
+    {
+        if (x1.is_contiguous() && x2.is_contiguous() && x1.shape == x2.shape)
+        {
+            ndarray<R> result(x1.shape, dtype_of<R>);
+            if (result.size() > 0)
+            {
+                np::simd::pow_vectorized(x1.data().data(), x2.data().data(), result.data().data(), result.size());
+            }
+            return result;
+        }
+    }
     return detail::elementwise(x1, x2, [](const T &base, const U &exp) -> R {
         if constexpr (detail::is_complex_v<R>)
         {
@@ -992,6 +1340,18 @@ auto power(const ndarray<T> &x1, const ndarray<U> &x2, ndarray<std::common_type_
     -> ndarray<std::common_type_t<T, U>> &
 {
     using R = std::common_type_t<T, U>;
+    if constexpr (std::is_same_v<T, U> && (std::is_same_v<T, float> || std::is_same_v<T, double>))
+    {
+        if (x1.is_contiguous() && x2.is_contiguous() && out.is_contiguous() && out.shape == x1.shape &&
+            x1.shape == x2.shape)
+        {
+            if (out.size() > 0)
+            {
+                np::simd::pow_vectorized(x1.data().data(), x2.data().data(), out.data().data(), out.size());
+            }
+            return out;
+        }
+    }
     return detail::elementwise_into(x1, x2, out, [](const T &base, const U &exp) -> R {
         if constexpr (detail::is_complex_v<R>)
         {
@@ -1016,6 +1376,15 @@ auto power(const ndarray<T> &x1, const ndarray<U> &x2, ndarray<std::common_type_
  */
 NP_API template <detail::FloatingPoint T> NP_NODISCARD auto floor(const ndarray<T> &x) -> ndarray<T>
 {
+    if constexpr (std::is_same_v<T, float> || std::is_same_v<T, double>)
+    {
+        if (x.is_contiguous())
+        {
+            ndarray<T> out(x.shape);
+            simd::floor_vectorized(x.data().data(), out.data().data(), x.size());
+            return out;
+        }
+    }
     return detail::ufunc_unary(x, [](const T &v) { return std::floor(v); });
 }
 
@@ -1023,6 +1392,14 @@ NP_API template <detail::FloatingPoint T> NP_NODISCARD auto floor(const ndarray<
  * @throws std::invalid_argument if `out.shape` differs from `x.shape`. */
 NP_API template <detail::FloatingPoint T> auto floor(const ndarray<T> &x, ndarray<T> &out) -> ndarray<T> &
 {
+    if constexpr (std::is_same_v<T, float> || std::is_same_v<T, double>)
+    {
+        if (x.is_contiguous() && out.is_contiguous() && x.shape == out.shape)
+        {
+            simd::floor_vectorized(x.data().data(), out.data().data(), x.size());
+            return out;
+        }
+    }
     return detail::ufunc_unary_into(x, out, [](const T &v) { return std::floor(v); });
 }
 
@@ -1036,6 +1413,15 @@ NP_API template <detail::FloatingPoint T> auto floor(const ndarray<T> &x, ndarra
  */
 NP_API template <detail::FloatingPoint T> NP_NODISCARD auto ceil(const ndarray<T> &x) -> ndarray<T>
 {
+    if constexpr (std::is_same_v<T, float> || std::is_same_v<T, double>)
+    {
+        if (x.is_contiguous())
+        {
+            ndarray<T> out(x.shape);
+            simd::ceil_vectorized(x.data().data(), out.data().data(), x.size());
+            return out;
+        }
+    }
     return detail::ufunc_unary(x, [](const T &v) { return std::ceil(v); });
 }
 
@@ -1043,6 +1429,14 @@ NP_API template <detail::FloatingPoint T> NP_NODISCARD auto ceil(const ndarray<T
  * @throws std::invalid_argument if `out.shape` differs from `x.shape`. */
 NP_API template <detail::FloatingPoint T> auto ceil(const ndarray<T> &x, ndarray<T> &out) -> ndarray<T> &
 {
+    if constexpr (std::is_same_v<T, float> || std::is_same_v<T, double>)
+    {
+        if (x.is_contiguous() && out.is_contiguous() && x.shape == out.shape)
+        {
+            simd::ceil_vectorized(x.data().data(), out.data().data(), x.size());
+            return out;
+        }
+    }
     return detail::ufunc_unary_into(x, out, [](const T &v) { return std::ceil(v); });
 }
 
@@ -1056,6 +1450,15 @@ NP_API template <detail::FloatingPoint T> auto ceil(const ndarray<T> &x, ndarray
  */
 NP_API template <detail::FloatingPoint T> NP_NODISCARD auto trunc(const ndarray<T> &x) -> ndarray<T>
 {
+    if constexpr (std::is_same_v<T, float> || std::is_same_v<T, double>)
+    {
+        if (x.is_contiguous())
+        {
+            ndarray<T> out(x.shape);
+            simd::trunc_vectorized(x.data().data(), out.data().data(), x.size());
+            return out;
+        }
+    }
     return detail::ufunc_unary(x, [](const T &v) { return std::trunc(v); });
 }
 
@@ -1063,6 +1466,14 @@ NP_API template <detail::FloatingPoint T> NP_NODISCARD auto trunc(const ndarray<
  * @throws std::invalid_argument if `out.shape` differs from `x.shape`. */
 NP_API template <detail::FloatingPoint T> auto trunc(const ndarray<T> &x, ndarray<T> &out) -> ndarray<T> &
 {
+    if constexpr (std::is_same_v<T, float> || std::is_same_v<T, double>)
+    {
+        if (x.is_contiguous() && out.is_contiguous() && x.shape == out.shape)
+        {
+            simd::trunc_vectorized(x.data().data(), out.data().data(), x.size());
+            return out;
+        }
+    }
     return detail::ufunc_unary_into(x, out, [](const T &v) { return std::trunc(v); });
 }
 
@@ -1077,6 +1488,15 @@ NP_API template <detail::FloatingPoint T> auto trunc(const ndarray<T> &x, ndarra
  */
 NP_API template <detail::FloatingPoint T> NP_NODISCARD auto rint(const ndarray<T> &x) -> ndarray<T>
 {
+    if constexpr (std::is_same_v<T, float> || std::is_same_v<T, double>)
+    {
+        if (x.is_contiguous())
+        {
+            ndarray<T> out(x.shape);
+            simd::rint_vectorized(x.data().data(), out.data().data(), x.size());
+            return out;
+        }
+    }
     return detail::ufunc_unary(x, [](const T &v) { return std::rint(v); });
 }
 
@@ -1084,6 +1504,14 @@ NP_API template <detail::FloatingPoint T> NP_NODISCARD auto rint(const ndarray<T
  * @throws std::invalid_argument if `out.shape` differs from `x.shape`. */
 NP_API template <detail::FloatingPoint T> auto rint(const ndarray<T> &x, ndarray<T> &out) -> ndarray<T> &
 {
+    if constexpr (std::is_same_v<T, float> || std::is_same_v<T, double>)
+    {
+        if (x.is_contiguous() && out.is_contiguous() && x.shape == out.shape)
+        {
+            simd::rint_vectorized(x.data().data(), out.data().data(), x.size());
+            return out;
+        }
+    }
     return detail::ufunc_unary_into(x, out, [](const T &v) { return std::rint(v); });
 }
 
@@ -1172,6 +1600,15 @@ NP_API template <detail::Numeric T> auto around(const ndarray<T> &x, int decimal
  */
 NP_API template <detail::Numeric T> NP_NODISCARD auto absolute(const ndarray<T> &x) -> ndarray<T>
 {
+    if constexpr (std::is_same_v<T, float> || std::is_same_v<T, double>)
+    {
+        if (x.is_contiguous())
+        {
+            ndarray<T> out(x.shape);
+            simd::abs_vectorized(x.data().data(), out.data().data(), x.size());
+            return out;
+        }
+    }
     return detail::ufunc_unary(x, [](const T &v) { return std::abs(v); });
 }
 
@@ -1179,6 +1616,14 @@ NP_API template <detail::Numeric T> NP_NODISCARD auto absolute(const ndarray<T> 
  * @throws std::invalid_argument if `out.shape` differs from `x.shape`. */
 NP_API template <detail::Numeric T> auto absolute(const ndarray<T> &x, ndarray<T> &out) -> ndarray<T> &
 {
+    if constexpr (std::is_same_v<T, float> || std::is_same_v<T, double>)
+    {
+        if (x.is_contiguous() && out.is_contiguous() && x.shape == out.shape)
+        {
+            simd::abs_vectorized(x.data().data(), out.data().data(), x.size());
+            return out;
+        }
+    }
     return detail::ufunc_unary_into(x, out, [](const T &v) { return std::abs(v); });
 }
 

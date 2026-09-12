@@ -14,6 +14,7 @@ set(NP_TESTS
     test_random
     test_statistics
     test_simd
+    test_vecmath
     test_manipulation
     test_scalar_custom
     test_char

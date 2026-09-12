@@ -17,7 +17,7 @@ lemma exterior_derivative_dim: "length (exterior_derivative_scalar f n) = n"
   by (simp add: exterior_derivative_scalar_def)
 
 lemma exterior_derivative_zero: "exterior_derivative_scalar (%_. 0) n = replicate n (%_. 0)"
-  sorry
+  by (simp add: exterior_derivative_scalar_def map_replicate_const)
 
 datatype sym_expr = SConst real | SVar nat | SAdd sym_expr sym_expr | SMul sym_expr sym_expr | SSin sym_expr | SCos sym_expr
 
@@ -94,6 +94,11 @@ lemma gradient_length: "length (gradient f n) = n"
   by (simp add: gradient_def)
 
 lemma gradient_const_zero: "gradient (SConst c) n = replicate n (SConst 0)"
-  sorry
+proof -
+  have "sym_diff (SConst c) = (%_::nat. SConst 0)"
+    by (rule ext) simp
+  then show ?thesis
+    by (simp add: gradient_def map_replicate_const)
+qed
 
 end

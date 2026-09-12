@@ -26,8 +26,25 @@ definition hodge_apply :: "int list => int list" where
 lemma hodge_apply_length: "length (hodge_apply xs) = length xs"
   by (simp add: hodge_apply_def)
 
-lemma hodge_apply_idempotent: "hodge_apply (hodge_apply xs) = hodge_apply xs"
-  unfolding hodge_apply_def hodge_star_def sorry
+text \<open>Idempotence holds on degrees 0..2 (outside, the first application
+  collapses to 0 and the second sends 0 to 1, so the unrestricted equation
+  is false — e.g. at p = 3. Applying twice always yields the constant 1.\<close>
+
+lemma hodge_apply_bounded_one: "ALL p:set xs. p <= 2 ==> hodge_apply xs = map (%_. 1) xs"
+  by (induct xs) (auto simp: hodge_apply_def hodge_star_def)
+
+lemma hodge_apply_idempotent: "ALL p:set xs. p <= 2 ==> hodge_apply (hodge_apply xs) = hodge_apply xs"
+proof -
+  assume h: "ALL p:set xs. p <= 2"
+  have e1: "hodge_apply xs = map (%_. 1) xs"
+    using h by (induct xs) (auto simp: hodge_apply_def hodge_star_def)
+  have e2: "hodge_apply (map (%_. 1) xs) = map (%_. 1) xs"
+    by (simp add: hodge_apply_def hodge_star_def)
+  show ?thesis using e1 e2 by simp
+qed
+
+lemma hodge_apply_twice_one: "hodge_apply (hodge_apply xs) = map (%_. 1) xs"
+  unfolding hodge_apply_def hodge_star_def by simp
 
 definition spectral_d :: "spectral_page => spectral_page" where
   "spectral_d E = (%(p,q). E (p+1, q))"

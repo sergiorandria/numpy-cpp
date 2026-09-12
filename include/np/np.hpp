@@ -68,6 +68,7 @@
 #include "testing.hpp"
 #include "threadpool.hpp"
 #include "variety.hpp"
+#include "vecmath.hpp"
 #include "window.hpp"
 
 // NOTE: No blanket -Wbraced-scalar-init suppression here. That warning is

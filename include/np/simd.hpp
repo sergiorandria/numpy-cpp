@@ -20,43 +20,53 @@
 #include <type_traits>
 
 #include "pqc.hpp"
+#include "vecmath.hpp"
 
 #ifdef NP_HAS_SLEEF
 #include <sleef.h>
 #endif
 
-// Detect SIMD capabilities at compile time
-// AVX512 implies AVX2 and AVX, AVX2 implies AVX – define all lower levels
-// so kernels gated on NP_SIMD_AVX are visible in AVX2/AVX-512 builds.
+// Detect SIMD capabilities at compile time. Every level at or below the host
+// capability is defined (cumulative), so kernels gated on NP_SIMD_SSE2 stay
+// visible in SSE4/AVX/AVX-512 builds. (An elif chain here would silently
+// disable all SSE2 kernels on standard -msse4.2 / AVX builds.)
 #if defined(__AVX512F__)
 #define NP_SIMD_AVX512
+#endif
+#if defined(__AVX512F__) || defined(__AVX2__)
 #define NP_SIMD_AVX2
+#endif
+#if defined(__AVX512F__) || defined(__AVX2__) || defined(__AVX__)
 #define NP_SIMD_AVX
-#include <immintrin.h>
-#elif defined(__AVX2__)
-#define NP_SIMD_AVX2
-#define NP_SIMD_AVX
-#include <immintrin.h>
-#elif defined(__AVX__)
-#define NP_SIMD_AVX
-#include <immintrin.h>
-#elif defined(__SSE4_2__)
+#endif
+#if defined(__AVX512F__) || defined(__AVX2__) || defined(__AVX__) || defined(__SSE4_2__)
 #define NP_SIMD_SSE42
-#include <nmmintrin.h>
-#elif defined(__SSE4_1__)
+#endif
+#if defined(__AVX512F__) || defined(__AVX2__) || defined(__AVX__) || defined(__SSE4_2__) || defined(__SSE4_1__)
 #define NP_SIMD_SSE41
-#include <smmintrin.h>
-#elif defined(__SSSE3__)
+#endif
+#if defined(__AVX512F__) || defined(__AVX2__) || defined(__AVX__) || defined(__SSE4_2__) || defined(__SSE4_1__) || \
+    defined(__SSSE3__)
 #define NP_SIMD_SSSE3
-#include <tmmintrin.h>
-#elif defined(__SSE3__)
+#endif
+#if defined(__AVX512F__) || defined(__AVX2__) || defined(__AVX__) || defined(__SSE4_2__) || defined(__SSE4_1__) || \
+    defined(__SSSE3__) || defined(__SSE3__)
 #define NP_SIMD_SSE3
-#include <pmmintrin.h>
-#elif defined(__SSE2__) || defined(_M_X64) || (defined(_M_IX86_FP) && _M_IX86_FP >= 2)
+#endif
+#if defined(__AVX512F__) || defined(__AVX2__) || defined(__AVX__) || defined(__SSE4_2__) || defined(__SSE4_1__) || \
+    defined(__SSSE3__) || defined(__SSE3__) || defined(__SSE2__) || defined(_M_X64) || \
+    (defined(_M_IX86_FP) && _M_IX86_FP >= 2)
 #define NP_SIMD_SSE2
-#include <emmintrin.h>
-#elif defined(__ARM_NEON) || defined(__ARM_NEON__)
+#endif
+#if defined(__ARM_NEON) || defined(__ARM_NEON__)
 #define NP_SIMD_NEON
+#endif
+
+#if defined(NP_SIMD_SSE2) || defined(NP_SIMD_SSE3) || defined(NP_SIMD_SSSE3) || defined(NP_SIMD_SSE41) || \
+    defined(NP_SIMD_SSE42) || defined(NP_SIMD_AVX) || defined(NP_SIMD_AVX2) || defined(NP_SIMD_AVX512)
+#include <immintrin.h>
+#endif
+#if defined(NP_SIMD_NEON)
 #include <arm_neon.h>
 #endif
 
@@ -140,6 +150,10 @@ struct Features
 #else
         false;
 #endif
+
+    // Dependency-free vector math kernels (np::vecmath) are always available;
+    // SLEEF, when enabled, is preferred for sin/cos/exp/log only.
+    static constexpr bool has_vecmath = true;
 };
 
 // Vectorized Operations
@@ -1570,8 +1584,8 @@ template <typename T> inline void sin_vectorized(const T *in, T *out, std::size_
         for (; i < n; ++i)
             out[i] = std::sin(in[i]);
 #else
-        for (std::size_t i = 0; i < n; ++i)
-            out[i] = std::sin(in[i]);
+        // Dependency-free vector kernel (np::vecmath, no SLEEF required).
+        vecmath::sin(in, out, n);
 #endif
     }
     else if constexpr (std::is_same_v<T, float>)
@@ -1595,8 +1609,8 @@ template <typename T> inline void sin_vectorized(const T *in, T *out, std::size_
         for (; i < n; ++i)
             out[i] = std::sin(in[i]);
 #else
-        for (std::size_t i = 0; i < n; ++i)
-            out[i] = std::sin(in[i]);
+        // Dependency-free vector kernel (np::vecmath, no SLEEF required).
+        vecmath::sin(in, out, n);
 #endif
     }
     else
@@ -1634,8 +1648,8 @@ template <typename T> inline void cos_vectorized(const T *in, T *out, std::size_
         for (; i < n; ++i)
             out[i] = std::cos(in[i]);
 #else
-        for (std::size_t i = 0; i < n; ++i)
-            out[i] = std::cos(in[i]);
+        // Dependency-free vector kernel (np::vecmath, no SLEEF required).
+        vecmath::cos(in, out, n);
 #endif
     }
     else if constexpr (std::is_same_v<T, float>)
@@ -1659,8 +1673,8 @@ template <typename T> inline void cos_vectorized(const T *in, T *out, std::size_
         for (; i < n; ++i)
             out[i] = std::cos(in[i]);
 #else
-        for (std::size_t i = 0; i < n; ++i)
-            out[i] = std::cos(in[i]);
+        // Dependency-free vector kernel (np::vecmath, no SLEEF required).
+        vecmath::cos(in, out, n);
 #endif
     }
     else
@@ -1698,8 +1712,8 @@ template <typename T> inline void exp_vectorized(const T *in, T *out, std::size_
         for (; i < n; ++i)
             out[i] = std::exp(in[i]);
 #else
-        for (std::size_t i = 0; i < n; ++i)
-            out[i] = std::exp(in[i]);
+        // Dependency-free vector kernel (np::vecmath, no SLEEF required).
+        vecmath::exp(in, out, n);
 #endif
     }
     else if constexpr (std::is_same_v<T, float>)
@@ -1723,8 +1737,8 @@ template <typename T> inline void exp_vectorized(const T *in, T *out, std::size_
         for (; i < n; ++i)
             out[i] = std::exp(in[i]);
 #else
-        for (std::size_t i = 0; i < n; ++i)
-            out[i] = std::exp(in[i]);
+        // Dependency-free vector kernel (np::vecmath, no SLEEF required).
+        vecmath::exp(in, out, n);
 #endif
     }
     else
@@ -1762,8 +1776,8 @@ template <typename T> inline void log_vectorized(const T *in, T *out, std::size_
         for (; i < n; ++i)
             out[i] = std::log(in[i]);
 #else
-        for (std::size_t i = 0; i < n; ++i)
-            out[i] = std::log(in[i]);
+        // Dependency-free vector kernel (np::vecmath, no SLEEF required).
+        vecmath::log(in, out, n);
 #endif
     }
     else if constexpr (std::is_same_v<T, float>)
@@ -1787,14 +1801,138 @@ template <typename T> inline void log_vectorized(const T *in, T *out, std::size_
         for (; i < n; ++i)
             out[i] = std::log(in[i]);
 #else
-        for (std::size_t i = 0; i < n; ++i)
-            out[i] = std::log(in[i]);
+        // Dependency-free vector kernel (np::vecmath, no SLEEF required).
+        vecmath::log(in, out, n);
 #endif
     }
     else
     {
         for (std::size_t i = 0; i < n; ++i)
             out[i] = std::log(in[i]);
+    }
+}
+
+// Vector math kernels (np::vecmath backend).
+//
+// Every wrapper below dispatches to the dependency-free SIMD kernels in
+// np::vecmath for float/double, with a scalar std:: loop for tiny inputs
+// (tune::should_use_simd) and for other element types. Accuracy and special
+// values are documented in vecmath.hpp; all wrappers are bit-compatible with
+// the scalar path on edge cases (NaN/inf/signed zero/subnormals).
+#define NP_SIMD_VECMATH_UNARY(Name, StdFn)                                                                \
+    template <typename T> inline void Name##_vectorized(const T *in, T *out, std::size_t n)                \
+    {                                                                                                     \
+        if (!tune::should_use_simd(n))                                                                    \
+        {                                                                                                 \
+            for (std::size_t i = 0; i < n; ++i)                                                            \
+                out[i] = StdFn(in[i]);                                                                    \
+            return;                                                                                       \
+        }                                                                                                 \
+        if constexpr (std::is_same_v<T, float> || std::is_same_v<T, double>)                               \
+        {                                                                                                 \
+            vecmath::Name(in, out, n);                                                                    \
+        }                                                                                                 \
+        else                                                                                              \
+        {                                                                                                 \
+            for (std::size_t i = 0; i < n; ++i)                                                            \
+                out[i] = StdFn(in[i]);                                                                    \
+        }                                                                                                 \
+    }
+
+NP_SIMD_VECMATH_UNARY(tan, std::tan)
+NP_SIMD_VECMATH_UNARY(asin, std::asin)
+NP_SIMD_VECMATH_UNARY(acos, std::acos)
+NP_SIMD_VECMATH_UNARY(atan, std::atan)
+NP_SIMD_VECMATH_UNARY(sinh, std::sinh)
+NP_SIMD_VECMATH_UNARY(cosh, std::cosh)
+NP_SIMD_VECMATH_UNARY(tanh, std::tanh)
+NP_SIMD_VECMATH_UNARY(asinh, std::asinh)
+NP_SIMD_VECMATH_UNARY(acosh, std::acosh)
+NP_SIMD_VECMATH_UNARY(atanh, std::atanh)
+NP_SIMD_VECMATH_UNARY(expm1, std::expm1)
+NP_SIMD_VECMATH_UNARY(exp2, std::exp2)
+NP_SIMD_VECMATH_UNARY(log10, std::log10)
+NP_SIMD_VECMATH_UNARY(log2, std::log2)
+NP_SIMD_VECMATH_UNARY(log1p, std::log1p)
+NP_SIMD_VECMATH_UNARY(sqrt, std::sqrt)
+NP_SIMD_VECMATH_UNARY(cbrt, std::cbrt)
+NP_SIMD_VECMATH_UNARY(floor, std::floor)
+NP_SIMD_VECMATH_UNARY(ceil, std::ceil)
+NP_SIMD_VECMATH_UNARY(trunc, std::trunc)
+NP_SIMD_VECMATH_UNARY(rint, std::rint)
+NP_SIMD_VECMATH_UNARY(fabs, std::fabs)
+
+#undef NP_SIMD_VECMATH_UNARY
+
+#define NP_SIMD_VECMATH_BINARY(Name, StdFn)                                                               \
+    template <typename T> inline void Name##_vectorized(const T *a, const T *b, T *out, std::size_t n)     \
+    {                                                                                                     \
+        if (!tune::should_use_simd(n))                                                                    \
+        {                                                                                                 \
+            for (std::size_t i = 0; i < n; ++i)                                                            \
+                out[i] = StdFn(a[i], b[i]);                                                               \
+            return;                                                                                       \
+        }                                                                                                 \
+        if constexpr (std::is_same_v<T, float> || std::is_same_v<T, double>)                               \
+        {                                                                                                 \
+            vecmath::Name(a, b, out, n);                                                                  \
+        }                                                                                                 \
+        else                                                                                              \
+        {                                                                                                 \
+            for (std::size_t i = 0; i < n; ++i)                                                            \
+                out[i] = StdFn(a[i], b[i]);                                                               \
+        }                                                                                                 \
+    }
+
+NP_SIMD_VECMATH_BINARY(atan2, std::atan2)
+NP_SIMD_VECMATH_BINARY(pow, std::pow)
+NP_SIMD_VECMATH_BINARY(hypot, std::hypot)
+
+#undef NP_SIMD_VECMATH_BINARY
+
+/** @brief Fused sin+cos in a single pass (one range reduction). */
+template <typename T> inline void sincos_vectorized(const T *in, T *out_s, T *out_c, std::size_t n)
+{
+    if (!tune::should_use_simd(n))
+    {
+        for (std::size_t i = 0; i < n; ++i)
+        {
+            out_s[i] = std::sin(in[i]);
+            out_c[i] = std::cos(in[i]);
+        }
+        return;
+    }
+    if constexpr (std::is_same_v<T, float> || std::is_same_v<T, double>)
+    {
+        vecmath::sincos(in, out_s, out_c, n);
+    }
+    else
+    {
+        for (std::size_t i = 0; i < n; ++i)
+        {
+            out_s[i] = std::sin(in[i]);
+            out_c[i] = std::cos(in[i]);
+        }
+    }
+}
+
+/** @brief Absolute value via bit trick (exact, correctly rounded). */
+template <typename T> inline void abs_vectorized(const T *in, T *out, std::size_t n)
+{
+    if (!tune::should_use_simd(n))
+    {
+        for (std::size_t i = 0; i < n; ++i)
+            out[i] = std::abs(in[i]);
+        return;
+    }
+    if constexpr (std::is_same_v<T, float> || std::is_same_v<T, double>)
+    {
+        vecmath::fabs(in, out, n);
+    }
+    else
+    {
+        for (std::size_t i = 0; i < n; ++i)
+            out[i] = std::abs(in[i]);
     }
 }
 
