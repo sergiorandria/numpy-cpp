@@ -201,5 +201,88 @@ int main()
         }
         test::check(threw, "dot mismatch throws");
     }
+    // — Production hardening: strided-view inputs give logical results —
+    {
+        auto base = np::ndarray<float>::from_data({2, 4}, {0.5f, 0.25f, -0.25f, -0.5f, 0.1f, 0.2f, 0.3f, 0.4f});
+        auto wv = base.transpose(); // [4,2] non-contiguous view
+        Crossbar cbv(wv);
+        auto xv = np::ndarray<float>::from_data({4}, {1, 0, 0, 0});
+        auto yv = cbv.dot(xv);
+        // first logical row of W is (0.5, 0.1)
+        test::check(yv.size() == 2 && test::approx(yv[0], 0.5) && test::approx(yv[1], 0.1, 1e-6), "dot view weights");
+        auto yva = cbv.apply(xv);
+        test::check(yva.size() == 2 && test::approx(yva[0], 0.5, 1e-6) && test::approx(yva[1], 0.1, 1e-6),
+                    "apply view weights");
+        auto q = quantize_weights(wv, 4);
+        test::check(q.size() == 8, "quantize_weights view size");
+        DifferentialCrossbar dcb(wv);
+        auto yd = dcb.dot(xv);
+        test::check(yd.size() == 2, "diff dot view size");
+    }
+    // — program() option validation —
+    {
+        auto w = np::ndarray<float>::from_data({2}, {0.0f, 0.0f});
+        Crossbar prog(w);
+        bool threw = false;
+        try
+        {
+            ProgramOptions bad;
+            bad.max_iters = 0;
+            (void)prog.program(w, bad);
+        }
+        catch (const std::invalid_argument &)
+        {
+            threw = true;
+        }
+        test::check(threw, "program max_iters validation");
+        threw = false;
+        try
+        {
+            ProgramOptions bad;
+            bad.tol = -1.0;
+            (void)prog.program(w, bad);
+        }
+        catch (const std::invalid_argument &)
+        {
+            threw = true;
+        }
+        test::check(threw, "program tol validation");
+        // program with a transposed-view target programs logical values
+        auto base = np::ndarray<float>::from_data({2, 2}, {0.5f, -0.5f, 0.25f, -0.25f});
+        auto tv = base.transpose(); // [2,2] view, logical (0,0)=0.5
+        Crossbar prog2(np::ndarray<float>::from_data({2, 2}, {0.0f, 0.0f, 0.0f, 0.0f}));
+        ProgramResult r2 = prog2.program(tv, {.tol = 1e-6, .max_iters = 5});
+        test::check(r2.converged && test::approx(prog2.weights(0, 0), 0.5f, 1e-6), "program view target");
+    }
+    // — quantized() round-trips per mapping —
+    {
+        auto w = np::ndarray<float>::from_data({2, 2}, {0.5f, -0.5f, 0.25f, -0.25f});
+        MemristorConfig cfg;
+        cfg.cell_bits = 4;
+        cfg.mapping = MappingScheme::DifferentialPair;
+        Crossbar cbd(w, cfg);
+        auto qd = cbd.quantized();
+        test::check(std::abs(qd.weights(0, 0) - 0.5f) < 0.1f && std::abs(qd.weights(0, 1) + 0.5f) < 0.1f,
+                    "quantized differential sign-preserving");
+        cfg.mapping = MappingScheme::OffsetSubtraction;
+        Crossbar cbo(w, cfg);
+        auto qo = cbo.quantized();
+        test::check(qo.weights.size() == 4, "quantized offset shape");
+    }
+    // — self_test tol validation —
+    {
+        auto w = np::ndarray<float>::from_data({2}, {0.5f, -0.5f});
+        Crossbar cb(w);
+        bool threw = false;
+        try
+        {
+            (void)cb.self_test(4, 0.0);
+        }
+        catch (const std::invalid_argument &)
+        {
+            threw = true;
+        }
+        test::check(threw, "self_test tol validation");
+    }
     return test::failures() ? 1 : 0;
 }
