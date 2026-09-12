@@ -14,8 +14,10 @@
 #include <algorithm>
 #include <complex>
 #include <cstddef>
+#include <limits>
 #include <numeric>
 #include <stdexcept>
+#include <string>
 #include <vector>
 
 #include "api_macros.hpp"
@@ -44,13 +46,15 @@ NP_API template <typename T> NP_NODISCARD auto lexsort(const std::vector<ndarray
         throw std::invalid_argument("lexsort: at least one key required");
     }
     std::size_t n = keys[0].size();
-    for (auto &k : keys)
+    for (const auto &k : keys)
     {
         if (k.ndim() != 1)
             throw std::invalid_argument("lexsort: keys must be 1-D");
         if (k.size() != n)
             throw std::invalid_argument("lexsort: keys length mismatch");
     }
+    if (n > static_cast<std::size_t>(std::numeric_limits<int>::max()))
+        throw std::length_error("lexsort: key length exceeds int range");
 
     std::vector<std::size_t> idx(n);
     std::iota(idx.begin(), idx.end(), 0);
@@ -193,64 +197,47 @@ NP_API template <typename T> NP_NODISCARD std::size_t count_nonzero(const ndarra
 
 NP_API template <typename T> NP_NODISCARD auto count_nonzero(const ndarray<T> &arr, int axis) -> ndarray<std::size_t>
 {
-    axis = static_cast<int>(arr.ndim()) > 0 ? [&](void) {
-        int a = axis;
-        if (a < 0)
-            a += static_cast<int>(arr.ndim());
-
-        if (a < 0 || a >= static_cast<int>(arr.ndim()))
-            throw AxisError("count_nonzero: axis out of bounds");
-
-        return a;
-    }()
-                                            : throw std::invalid_argument("count_nonzero: 0-d array has no axis");
+    if (arr.ndim() == 0)
+        throw std::invalid_argument("count_nonzero: 0-d array has no axis");
+    if (axis < 0)
+        axis += static_cast<int>(arr.ndim());
+    if (axis < 0 || axis >= static_cast<int>(arr.ndim()))
+        throw AxisError("count_nonzero: axis out of bounds");
 
     std::vector<int> out_shape = arr.shape;
     out_shape.erase(out_shape.begin() + axis);
     ndarray<std::size_t> out(out_shape);
     std::fill(out.data().begin(), out.data().end(), 0);
 
+    // Row-major strides of the (contiguous) output, hoisted out of the loop.
+    std::vector<std::size_t> out_strides(out_shape.size(), 1);
+    for (std::ptrdiff_t d = static_cast<std::ptrdiff_t>(out_shape.size()) - 2; d >= 0; --d)
+        out_strides[static_cast<std::size_t>(d)] =
+            out_strides[static_cast<std::size_t>(d) + 1] * static_cast<std::size_t>(out_shape[static_cast<std::size_t>(d) + 1]);
+
     // Iterate over all elements and increment output bin
     detail::Odometer od(arr.shape);
+    std::vector<std::size_t> oidx;
+    oidx.reserve(out_shape.size());
     while (!od.done())
     {
         const auto &idx = od.idx();
         if (static_cast<bool>(arr.get(idx)))
         {
-            std::vector<std::size_t> oidx;
-            oidx.reserve(out_shape.size());
-
+            oidx.clear();
             for (std::size_t d = 0; d < idx.size(); ++d)
                 if (static_cast<int>(d) != axis)
                     oidx.push_back(idx[d]);
 
-            // compute flat offset into out
-            std::size_t flat = 0;
-            for (std::size_t d = 0; d < oidx.size(); ++d)
-            {
-                flat = flat * static_cast<std::size_t>(out.shape[d]) + oidx[d];
-            }
-
-            // Need strides-aware offset, but out is contiguous so flat works
-            // For views, use set
             if (oidx.empty())
             {
                 out.data()[0] += 1;
             }
             else
             {
-                // Use get/set via vector
-                std::vector<std::size_t> out_idx = oidx;
-                // Increment via logical counting
-                // Instead of flat, use od for out? Simpler: use out.get/out.set with vector
-                // But we already have oidx, we can compute flat using row-major
                 std::size_t fo = 0;
-                std::size_t stride = 1;
-                for (std::ptrdiff_t d = static_cast<std::ptrdiff_t>(oidx.size()) - 1; d >= 0; --d)
-                {
-                    fo += oidx[static_cast<std::size_t>(d)] * stride;
-                    stride *= static_cast<std::size_t>(out_shape[static_cast<std::size_t>(d)]);
-                }
+                for (std::size_t d = 0; d < oidx.size(); ++d)
+                    fo += oidx[d] * out_strides[d];
                 out.data()[fo] += 1;
             }
         }
@@ -312,19 +299,35 @@ NP_NODISCARD std::size_t searchsorted(const ndarray<T> &a, const T &value, const
 {
     if (sorter.size() != a.size())
         throw std::invalid_argument("searchsorted: sorter size mismatch");
-    // Build sorted view according to sorter
-    std::vector<T> sorted(a.size());
-    for (std::size_t i = 0; i < a.size(); ++i)
-        sorted[i] = a.data()[a._flat_logical(sorter.data()[sorter._flat_logical(i)])];
-    // Binary search on sorted
+    // Binary search over sorter indices directly (no sorted copy, no
+    // default-constructed T required).
+    const auto at_sorted = [&](std::size_t i) -> const T & {
+        return a.data()[a._flat_logical(sorter.data()[sorter._flat_logical(i)])];
+    };
+    std::size_t lo = 0, hi = a.size();
     if (!side_right)
     {
-        return static_cast<std::size_t>(std::lower_bound(sorted.begin(), sorted.end(), value) - sorted.begin());
+        while (lo < hi)
+        {
+            std::size_t mid = lo + (hi - lo) / 2;
+            if (at_sorted(mid) < value)
+                lo = mid + 1;
+            else
+                hi = mid;
+        }
     }
     else
     {
-        return static_cast<std::size_t>(std::upper_bound(sorted.begin(), sorted.end(), value) - sorted.begin());
+        while (lo < hi)
+        {
+            std::size_t mid = lo + (hi - lo) / 2;
+            if (value < at_sorted(mid))
+                hi = mid;
+            else
+                lo = mid + 1;
+        }
     }
+    return lo;
 }
 
 /** @brief Extract elements where condition is true (np.extract).
@@ -434,7 +437,10 @@ NP_NODISCARD inline auto digitize_alias(const ndarray<T> &x, const ndarray<doubl
     // to avoid extra include, implement minimal here
     if (bins.ndim() != 1)
         throw std::invalid_argument("digitize: bins must be 1-D");
-    std::vector<double> sorted(bins.data().begin(), bins.data().begin() + bins.size());
+    // NumPy requires monotonic bins; sort a copy so unsorted input still
+    // yields well-defined lower_bound results instead of garbage.
+    std::vector<double> sorted(bins.data().begin(), bins.data().end());
+    std::sort(sorted.begin(), sorted.end());
     ndarray<std::size_t> out(x.shape);
     std::size_t i = 0;
     for (auto it = x.begin(); it != x.end(); ++it, ++i)
