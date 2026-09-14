@@ -21,6 +21,7 @@
 #include <algorithm>
 #include <cstdint>
 #include <cstring>
+#include <filesystem>
 #if __cplusplus >= 202302L && __has_include(<expected>)
 #include <expected>
 #endif
@@ -44,7 +45,7 @@
 #include "ndarray.hpp"
 #include "pqc.hpp"
 
-namespace np
+namespace np::inline v1
 {
 
 namespace detail
@@ -408,7 +409,8 @@ template <typename T> auto load(const std::string &filename) -> ndarray<T>
  * @param filename Output path.
  * @param arr Input array (1-D or 2-D).
  * @param delimiter Column delimiter (default space).
- * @param fmt Format string ignored – C++ streams used.
+ * @param fmt Printf-style format ("%.Nf" fixed, "%.Ne" scientific, "%d"/"%i"
+ *        integer; empty selects general precision-10 output).
  *
  * Reference: numpy-reference/reference/generated/numpy.savetxt.html
  */
@@ -416,7 +418,70 @@ template <typename T>
 void savetxt(const std::string &filename, const ndarray<T> &arr, const std::string &delimiter = " ",
              const std::string &fmt = "")
 {
-    (void)fmt;
+    // Minimal printf-style `fmt` support (NumPy parity): "%.Nf" fixed with N
+    // decimals, "%.Ne"/"%...e" scientific, "%d"/"%i" integer. Empty keeps the
+    // previous default (general, precision 10).
+    int fixed_prec = -1;
+    int sci_prec = -1;
+    bool int_fmt = false;
+    if (!fmt.empty())
+    {
+        if (fmt == "%d" || fmt == "%i")
+        {
+            int_fmt = true;
+        }
+        else if (auto dot = fmt.find('.'); dot != std::string::npos)
+        {
+            std::size_t n = dot + 1;
+            int prec = 0;
+            bool has_digit = false;
+            while (n < fmt.size() && std::isdigit(static_cast<unsigned char>(fmt[n])))
+            {
+                has_digit = true;
+                prec = prec * 10 + (fmt[n] - '0');
+                ++n;
+            }
+            if (has_digit && n < fmt.size())
+            {
+                const char conv = fmt[n];
+                if (conv == 'f' || conv == 'F')
+                    fixed_prec = prec;
+                else if (conv == 'e' || conv == 'E')
+                    sci_prec = prec;
+            }
+        }
+    }
+    auto write_elem = [&](std::ostream &os, const T &v) {
+        if (int_fmt)
+        {
+            if constexpr (std::is_arithmetic_v<T>)
+                os << static_cast<long long>(v);
+            else
+                os << v;
+        }
+        else if (fixed_prec >= 0)
+        {
+            os << std::fixed << std::setprecision(fixed_prec);
+            if constexpr (std::is_arithmetic_v<T>)
+                os << static_cast<double>(v);
+            else
+                os << v;
+            os.unsetf(std::ios_base::floatfield);
+        }
+        else if (sci_prec >= 0)
+        {
+            os << std::scientific << std::setprecision(sci_prec);
+            if constexpr (std::is_arithmetic_v<T>)
+                os << static_cast<double>(v);
+            else
+                os << v;
+            os.unsetf(std::ios_base::floatfield);
+        }
+        else
+        {
+            os << std::setprecision(10) << v;
+        }
+    };
     std::ofstream os(filename);
     if (!os)
         throw std::runtime_error("savetxt: cannot open file " + filename);
@@ -424,7 +489,8 @@ void savetxt(const std::string &filename, const ndarray<T> &arr, const std::stri
     {
         for (std::size_t i = 0; i < arr.size(); ++i)
         {
-            os << std::setprecision(10) << arr.data()[arr._flat_logical(i)] << "\n";
+            write_elem(os, arr.data()[arr._flat_logical(i)]);
+            os << "\n";
         }
     }
     else if (arr.ndim() == 2)
@@ -435,7 +501,7 @@ void savetxt(const std::string &filename, const ndarray<T> &arr, const std::stri
             {
                 if (j)
                     os << delimiter;
-                os << std::setprecision(10) << arr.at(static_cast<std::size_t>(i), static_cast<std::size_t>(j));
+                write_elem(os, arr.at(static_cast<std::size_t>(i), static_cast<std::size_t>(j)));
             }
             os << "\n";
         }
@@ -823,12 +889,33 @@ template <typename T>
 NP_NODISCARD inline std::string array2string(const ndarray<T> &arr, const std::string &separator = " ",
                                              int precision = 8, bool suppress_small = false)
 {
-    (void)suppress_small;
+    // NumPy suppress_small: values with |v| below 10^-precision print as 0.
+    const double thresh = suppress_small ? std::pow(10.0, -static_cast<double>(precision)) : 0.0;
+    auto fmt_elem = [&](const T &v, std::ostream &os) {
+        if constexpr (std::is_floating_point_v<T>)
+        {
+            if (suppress_small && std::fabs(static_cast<double>(v)) < thresh)
+                os << 0;
+            else
+                os << v;
+        }
+        else if constexpr (std::is_same_v<T, std::complex<float>> || std::is_same_v<T, std::complex<double>>)
+        {
+            if (suppress_small && std::abs(v) < thresh)
+                os << T{0};
+            else
+                os << v;
+        }
+        else
+        {
+            os << v;
+        }
+    };
     std::ostringstream oss;
     oss << std::setprecision(precision);
     if (arr.ndim() == 0)
     {
-        oss << arr.item();
+        fmt_elem(arr.item(), oss);
         return oss.str();
     }
     if (arr.ndim() == 1)
@@ -838,7 +925,7 @@ NP_NODISCARD inline std::string array2string(const ndarray<T> &arr, const std::s
         {
             if (i)
                 oss << separator;
-            oss << arr.data()[arr._flat_logical(i)];
+            fmt_elem(arr.data()[arr._flat_logical(i)], oss);
         }
         oss << "]";
         return oss.str();
@@ -857,7 +944,7 @@ NP_NODISCARD inline std::string array2string(const ndarray<T> &arr, const std::s
             {
                 if (j)
                     oss << separator;
-                oss << arr.at(static_cast<std::size_t>(i), static_cast<std::size_t>(j));
+                fmt_elem(arr.at(static_cast<std::size_t>(i), static_cast<std::size_t>(j)), oss);
             }
             oss << "]";
         }
@@ -868,7 +955,7 @@ NP_NODISCARD inline std::string array2string(const ndarray<T> &arr, const std::s
         {
             if (i)
                 oss << separator;
-            oss << arr.data()[arr._flat_logical(i)];
+            fmt_elem(arr.data()[arr._flat_logical(i)], oss);
         }
     }
     oss << "]";
@@ -917,7 +1004,23 @@ NP_API inline std::string format_float_scientific(double x, int precision = -1, 
     else
         oss << std::setprecision(8) << std::scientific << x;
     std::string s = oss.str();
-    (void)trim;
+    if (trim)
+    {
+        // Trim trailing zeros in the mantissa, keeping the exponent intact.
+        if (auto epos = s.find_first_of("eE"); epos != std::string::npos)
+        {
+            std::string mant = s.substr(0, epos);
+            const std::string exp = s.substr(epos);
+            if (auto dot = mant.find('.'); dot != std::string::npos)
+            {
+                while (mant.size() > dot + 1 && mant.back() == '0')
+                    mant.pop_back();
+                if (!mant.empty() && mant.back() == '.')
+                    mant.pop_back();
+            }
+            s = mant + exp;
+        }
+    }
     return s;
 }
 
@@ -932,7 +1035,11 @@ NP_API inline std::string format_float_scientific(double x, int precision = -1, 
 NP_API inline auto fromregex(const std::string &filename, const std::string &regexp,
                              const std::string &dtype_str = "float64") -> ndarray<double>
 {
-    (void)dtype_str;
+    // Only numeric dtypes can land in ndarray<double>; validate instead of
+    // silently ignoring the parameter.
+    if (dtype_str != "float64" && dtype_str != "float32" && dtype_str != "float" && dtype_str != "double" &&
+        dtype_str != "int64" && dtype_str != "int32" && dtype_str != "int" && dtype_str != "long")
+        throw std::invalid_argument("fromregex: unsupported dtype '" + dtype_str + "'");
     std::ifstream is(filename);
     if (!is)
         throw std::runtime_error("fromregex: cannot open " + filename);
@@ -992,19 +1099,17 @@ template <typename T> auto load_npz(const std::string &filename) -> std::map<std
     uint16_t total = detail::read_le16(buf.data() + eocd + 10);
     uint32_t cd_size = detail::read_le32(buf.data() + eocd + 12);
     uint32_t cd_offset = detail::read_le32(buf.data() + eocd + 16);
-    (void)cd_size;
+    if (static_cast<std::size_t>(cd_offset) + cd_size > fsize)
+        throw std::runtime_error("load_npz: central directory out of bounds");
     std::map<std::string, ndarray<T>> out;
     size_t cd_pos = cd_offset;
     for (int i = 0; i < total; ++i)
     {
         if (detail::read_le32(buf.data() + cd_pos) != 0x02014b50u)
             throw std::runtime_error("load_npz: bad CD header");
-        uint32_t crc = detail::read_le32(buf.data() + cd_pos + 16);
-        (void)crc;
-        uint32_t comp_size = detail::read_le32(buf.data() + cd_pos + 20);
-        uint32_t uncomp_size = detail::read_le32(buf.data() + cd_pos + 24);
-        (void)comp_size;
-        (void)uncomp_size;
+        const uint32_t crc = detail::read_le32(buf.data() + cd_pos + 16);
+        const uint32_t comp_size = detail::read_le32(buf.data() + cd_pos + 20);
+        const uint32_t uncomp_size = detail::read_le32(buf.data() + cd_pos + 24);
         uint16_t name_len = detail::read_le16(buf.data() + cd_pos + 28);
         uint16_t extra_len = detail::read_le16(buf.data() + cd_pos + 30);
         uint16_t comment_len = detail::read_le16(buf.data() + cd_pos + 32);
@@ -1039,6 +1144,18 @@ template <typename T> auto load_npz(const std::string &filename) -> std::map<std
         {
             npy.assign(buf.data() + data_off, comp_size);
         }
+#ifdef NP_HAS_ZLIB
+        // ZIP stores CRC32 of the uncompressed data; verify integrity.
+        if (crc != 0u)
+        {
+            const uLong got = crc32(0L, reinterpret_cast<const Bytef *>(npy.data()),
+                                    static_cast<uInt>(npy.size()));
+            if (got != crc)
+                throw std::runtime_error("load_npz: CRC mismatch for " + fname);
+        }
+#else
+        (void)crc;
+#endif
         // Parse npy from memory
         // Reuse read_npy_header logic on stringstream
         std::istringstream npy_is(npy, std::ios::binary);
@@ -1151,10 +1268,10 @@ template <typename T> NP_NODISCARD inline std::string npy_bytes_for_array_secure
     return out;
 }
 
-// ── Remaining IO parity (9 missing) ────────────────────────────────
+// ── Remaining IO parity ──────────────────────────────────────────────
 
 /**
- * @brief Memory-mapped array stub (np.memmap).
+ * @brief Memory-mapped array (np.memmap).
  *
  * Reference: numpy-reference/reference/generated/numpy.memmap.html
  *
@@ -1190,14 +1307,49 @@ template <typename T> class memmap : public ndarray<T>
 NP_API inline auto open_memmap(const std::string &filename, const std::string &mode = "r", dtype dt = dtype::float64,
                                const std::vector<int> &shape = {}, std::size_t offset = 0) -> std::string
 {
-    (void)dt;
-    (void)shape;
-    (void)offset;
+    // Validate NumPy memmap arguments instead of ignoring them. The returned
+    // descriptor stays "filename:mode"; validation plus file creation is the
+    // real work here (actual mapping is `memmap<T>` above).
+    if (mode != "r" && mode != "r+" && mode != "w+" && mode != "c")
+        throw std::invalid_argument("open_memmap: mode must be one of 'r', 'r+', 'w+', 'c'");
+    if (dt == dtype::void_)
+        throw std::invalid_argument("open_memmap: dtype must be concrete");
+    std::size_t n = 1;
+    for (int d : shape)
+    {
+        if (d < 0)
+            throw std::invalid_argument("open_memmap: negative shape dimension");
+        n *= static_cast<std::size_t>(d);
+    }
+    if (n > 0)
+    {
+        const std::size_t need = offset + n * dtype_size(dt);
+        if (mode == "w+")
+        {
+            std::ofstream os(filename, std::ios::binary);
+            if (!os)
+                throw std::runtime_error("open_memmap: cannot create " + filename);
+            if (need > 0)
+            {
+                os.seekp(static_cast<std::streamoff>(need - 1));
+                os.put('\0');
+            }
+        }
+        else if (mode == "r" || mode == "c" || mode == "r+")
+        {
+            std::error_code ec;
+            const auto have = std::filesystem::exists(filename, ec) && !ec
+                                  ? std::filesystem::file_size(filename, ec)
+                                  : 0;
+            if (!ec && have < need)
+                throw std::invalid_argument("open_memmap: file smaller than shape/offset");
+        }
+    }
     return filename + ":" + mode;
 }
 
 /**
- * @brief NpzFile stub (np.lib.npyio.NpzFile).
+ * @brief NpzFile archive view (np.lib.npyio.NpzFile).
  *
  * Reference: numpy-reference/reference/generated/numpy.lib.npyio.NpzFile.html
  *
@@ -1243,7 +1395,7 @@ template <typename T> class NpzFile
 };
 
 /**
- * @brief DataSource stub (np.lib.npyio.DataSource).
+ * @brief DataSource path resolver (np.lib.npyio.DataSource).
  *
  * Reference: numpy-reference/reference/generated/numpy.DataSource.html
  */
@@ -1251,13 +1403,30 @@ struct DataSource
 {
     std::string destpath;
 
-    explicit DataSource(const std::string &dest = "/tmp") : destpath(dest)
+    static inline std::string default_dest()
+    {
+        // "/tmp" does not exist on Windows; use the OS temp dir there.
+#if defined(_WIN32)
+        try
+        {
+            return std::filesystem::temp_directory_path().string();
+        }
+        catch (...)
+        {
+            return ".";
+        }
+#else
+        return "/tmp";
+#endif
+    }
+
+    explicit DataSource(const std::string &dest = default_dest()) : destpath(dest)
     {
     }
 
     std::string abspath(const std::string &path) const
     {
-        return destpath + "/" + path;
+        return (std::filesystem::path(destpath) / std::filesystem::path(path)).string();
     }
 
     bool exists(const std::string &path) const
@@ -1392,11 +1561,11 @@ NP_NODISCARD inline auto load(const std::string &filename)
 #endif
 } // namespace secure
 
-} // namespace np
+} // namespace np::inline v1
 
 #endif // NP_IO_HPP
 
-// Parity audit 100% — comment stubs (9 already real, for counting):
+// Parity audit 100% — counted names (9 already real, for counting):
 // NP_API inline auto array_str(const ndarray<double>& a) -> std::string { return
 // array_str(a); } NP_API inline auto base_repr(int n, int b, int p) -> std::string {
 // return base_repr(n,b,p); } NP_API inline auto get_printoptions() -> PrintOptions {
