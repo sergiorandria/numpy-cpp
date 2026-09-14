@@ -39,7 +39,7 @@
 #include "ndarray.hpp"
 #include "simd.hpp"
 
-namespace np
+namespace np::inline v1
 {
 
 namespace detail
@@ -2376,7 +2376,9 @@ NP_NODISCARD auto unwrap(const ndarray<T> &p, T discont = std::numbers::pi_v<T>,
     {
         throw std::invalid_argument("unwrap: only 1-D supported in this implementation");
     }
-    (void)axis;
+    // Only axis -1/0 select the single 1-D axis; anything else is out of bounds.
+    if (axis != -1 && axis != 0)
+        throw std::invalid_argument("unwrap: axis out of bounds for 1-D array");
     ndarray<T> out(p.shape);
     if (p.size() == 0)
         return out;
@@ -3207,6 +3209,6 @@ NP_NODISCARD inline auto real_if_close(const ndarray<T> &a, double tol = 100.0)
     }
 }
 
-} // namespace np
+} // namespace np::inline v1
 
 #endif // NP_MATH_HPP

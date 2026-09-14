@@ -42,7 +42,7 @@
 #include <expected>
 #endif
 
-namespace np
+namespace np::inline v1
 {
 
 /** @brief Array of zeros with the given shape.
@@ -1228,7 +1228,6 @@ NP_API template <typename T> NP_NODISCARD auto bmat(const std::vector<std::vecto
     {
         throw std::invalid_argument("bmat: empty object");
     }
-    int rows0 = obj[0][0].shape[0];
     for (auto &row : obj)
     {
         for (auto &b : row)
@@ -1238,9 +1237,6 @@ NP_API template <typename T> NP_NODISCARD auto bmat(const std::vector<std::vecto
                 throw std::invalid_argument("bmat: all blocks must be 2-D");
             }
         }
-        int h = row[0].shape[0];
-        (void)rows0;
-        (void)h;
     }
     // Reuse block logic by including manipulation would be circular;
     // fallback: horizontal stack rows then vertical stack – rely on caller
@@ -1371,15 +1367,18 @@ NP_API inline auto triu_indices(int n, int k = 0, int m = -1) -> std::pair<ndarr
 
 NP_API inline auto mask_indices(int n, bool (*mask_func)(int, int), int k = 0) -> std::pair<ndarray<int>, ndarray<int>>
 {
+    // NumPy passes k to the mask function (e.g. triu(n, k)). Since this
+    // function-pointer form cannot receive k, emulate it as a diagonal shift:
+    // evaluate mask_func(i, j - k), which reproduces triu/tril offset
+    // semantics for the standard mask functions.
     std::vector<int> rows, cols;
     for (int i = 0; i < n; ++i)
         for (int j = 0; j < n; ++j)
-            if (mask_func(i, j))
+            if (mask_func(i, j - k))
             {
                 rows.push_back(i);
                 cols.push_back(j);
             }
-    (void)k;
     ndarray<int> r(std::vector<int>{static_cast<int>(rows.size())});
     ndarray<int> c(std::vector<int>{static_cast<int>(cols.size())});
     for (std::size_t i = 0; i < rows.size(); ++i)
@@ -1546,7 +1545,7 @@ namespace rec
  *
  * Reference: numpy-reference/reference/generated/numpy.rec.array.html
  *
- * Minimal stubs – structured arrays are modeled as vector<map<string, double>>
+ * Minimal record model – structured arrays are modeled as vector<map<string, double>>
  * in this header-only port. These helpers provide API parity.
  */
 NP_API inline auto array(const std::vector<std::map<std::string, double>> &records)
@@ -1592,7 +1591,8 @@ NP_API inline auto fromrecords(const std::vector<std::vector<double>> &records,
 NP_API inline auto fromstring(const std::string &s, const std::string &dtype = "float64")
     -> std::vector<std::map<std::string, double>>
 {
-    (void)dtype;
+    if (dtype != "float64" && dtype != "float32" && dtype != "float" && dtype != "double")
+        throw std::invalid_argument("rec::fromstring: unsupported dtype '" + dtype + "'");
     auto vals = ::np::fromstring<double>(s);
     std::vector<std::map<std::string, double>> out;
     out.reserve(vals.size());
@@ -1697,6 +1697,6 @@ NP_API template <typename U, typename T> NP_NODISCARD auto empty_like(const ndar
     return ndarray<U>(a.shape, dtype_of<U>, U{});
 }
 
-} // namespace np
+} // namespace np::inline v1
 
 #endif // NP_CREATION_HPP
