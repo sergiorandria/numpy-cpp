@@ -11,9 +11,9 @@
  *
  * For classical manifolds (S^n, T^n, CP^n, RP^n, Klein) the Chern/Whitney
  * numbers are exact via Bott–Tu / Milnor-Stasheff:
- *   - `T CP^n : c = (1+h)^{n+1}`, `e = n+1`, `p = c·\bar c`
+ *   - `T CP^n : c = (1+h)^{n+1}`, `e = n+1`, `p = (1+h^2)^{n+1}`
  *   - `T RP^n : w = (1+a)^{n+1} (mod 2)`
- *   - `T S^{2k} : e=2, w_{2k}=1 (mod 2)`, `T T^n` trivial.
+ *   - `T S^n : w = 1 (stably trivial)`, `e = 2` (even) / `0` (odd); `T T^n` trivial.
  * Generic bundles fall back to zero classes with `inconclusive=true`.
  *
  * Reference: Milnor–Stasheff, Bott–Tu, Lee *Riemannian Manifolds*.
@@ -25,6 +25,7 @@
 
 #include <algorithm>
 #include <map>
+#include <stdexcept>
 #include <string>
 #include <vector>
 
@@ -34,7 +35,9 @@
 #include "homology.hpp"
 #include "manifold.hpp"
 
-namespace np::bundle
+namespace np::inline v1
+{
+namespace bundle
 {
 
 struct VectorBundle
@@ -85,16 +88,45 @@ struct CharacteristicClasses
 namespace detail
 {
 
-NP_NODISCARD inline long long binom_ll_small(int n, int k)
+// Exact binomial via multiplicative formula in bigint (arbitrary precision).
+// Replaces the old long-long version, which overflowed for n >= 67
+// (e.g. CP^34: C(35,17) > 2^63). Returns 0 outside 0<=k<=n.
+NP_NODISCARD inline bigint binom_exact(int n, int k)
 {
-    if (k < 0 || k > n)
-        return 0;
+    if (k < 0 || k > n || n < 0)
+        return bigint(0);
     if (k > n - k)
         k = n - k;
-    long long r = 1;
+    bigint r(1);
     for (int i = 0; i < k; ++i)
-        r = r * (n - i) / (i + 1);
+    {
+        r *= bigint(n - i);
+        r /= bigint(i + 1);
+    }
     return r;
+}
+
+// Parse "P^<digits>" suffix; returns -1 when absent or malformed.
+// Narrows stoi exceptions per AGENTS.md §4 (no catch-all swallow);
+// requires full consumption so "CP^3x" is inconclusive, not 3.
+NP_NODISCARD inline int parse_projective_n(const std::string &bn)
+{
+    auto pos = bn.find("P^");
+    if (pos == std::string::npos)
+        return -1;
+    try
+    {
+        const std::string tail = bn.substr(pos + 2);
+        std::size_t used = 0;
+        const int v = std::stoi(tail, &used);
+        if (used == 0 || used != tail.size() || v < 0)
+            return -1;
+        return v;
+    }
+    catch (const std::exception &)
+    {
+        return -1;
+    }
 }
 
 } // namespace detail
@@ -143,8 +175,8 @@ NP_NODISCARD inline CharacteristicClasses characteristic_classes(const VectorBun
     C.chern.assign(1, bigint(1));
     C.stiefel.assign(1, 1);
     C.euler = 0;
-    // Tangent of known bases
-    if (base)
+    // Tangent of known bases (needs non-negative dimension for sizing).
+    if (base && base->dimension() >= 0)
     {
         std::string bn = base->name();
         int n = base->dimension();
@@ -159,68 +191,62 @@ NP_NODISCARD inline CharacteristicClasses characteristic_classes(const VectorBun
                 C.chern.assign(1, bigint(1));
             return C;
         }
-        // Sphere S^n
+        // Sphere S^n: stably trivial (TS^n + trivial = trivial^{n+1}),
+        // so total Stiefel-Whitney w = 1. Euler is 2 (even) / 0 (odd).
         if (bn.rfind("S^", 0) == 0)
         {
-            int dim = n;
             C.chern = {bigint(1)};
-            C.stiefel.assign(dim + 1, 0);
-            C.stiefel[0] = 1;
-            if (dim % 2 == 0 && dim > 0)
-                C.stiefel[dim] = 1;
+            C.stiefel.assign(1, 1);
             C.pontryagin = {bigint(1)};
-            if (dim % 2 == 0)
+            if (n % 2 == 0)
                 C.euler = 2;
             else
                 C.euler = 0;
-            // Parallelizable spheres have trivial stable classes
-            if (bn == "S^1" || bn == "S^3" || bn == "S^7")
-            {
-                C.stiefel.assign(1, 1);
-            }
             return C;
         }
         // Complex projective CP^n
         if (bn.rfind("C", 0) == 0 && bn.find("P^") != std::string::npos)
         {
-            int cp_n = 0;
-            auto pos = bn.find("P^");
-            if (pos != std::string::npos)
-                cp_n = std::stoi(bn.substr(pos + 2));
+            int cp_n = detail::parse_projective_n(bn);
+            if (cp_n < 0)
+            {
+                C.inconclusive = true;
+                return C;
+            }
             int cpx_rank = cp_n; // complex rank of T CP^n is n
-            C.chern.assign(cpx_rank + 1, bigint(0));
+            C.chern.assign(static_cast<std::size_t>(cpx_rank) + 1, bigint(0));
             for (int k = 0; k <= cpx_rank; ++k)
-                C.chern[k] = bigint(detail::binom_ll_small(cp_n + 1, k));
+                C.chern[static_cast<std::size_t>(k)] = detail::binom_exact(cp_n + 1, k);
             // Euler = n+1
             C.euler = cp_n + 1;
             // Stiefel = mod2 reduction of Chern: w_{2k}=c_k mod2, w_{odd}=0
-            C.stiefel.assign(2 * cpx_rank + 1, 0);
+            C.stiefel.assign(static_cast<std::size_t>(2 * cpx_rank) + 1, 0);
             C.stiefel[0] = 1;
             for (int k = 1; k <= cpx_rank; ++k)
-                C.stiefel[2 * k] = static_cast<int>(detail::binom_ll_small(cp_n + 1, k) % 2);
-            // Pontryagin from Chern: p = c·\bar c
-            C.pontryagin.assign(cpx_rank + 1, bigint(0));
+                C.stiefel[static_cast<std::size_t>(2 * k)] = static_cast<int>(detail::binom_exact(cp_n + 1, k) % 2);
+            // Pontryagin from Chern: p = (1+h^2)^{n+1}, so p_k = C(n+1,k).
+            C.pontryagin.assign(static_cast<std::size_t>(cpx_rank) + 1, bigint(0));
             C.pontryagin[0] = 1;
-            // Simplified: p_k = (-1)^k coefficient? For CP^n, p = (1+h^2)^{n+1}
             for (int k = 1; k <= cpx_rank / 2; ++k)
-                C.pontryagin[k] = bigint(detail::binom_ll_small(cp_n + 1, 2 * k));
+                C.pontryagin[static_cast<std::size_t>(k)] = detail::binom_exact(cp_n + 1, k);
             return C;
         }
         // Real projective RP^n
         if (bn.rfind("R", 0) == 0 && bn.find("P^") != std::string::npos)
         {
-            int rp_n = 0;
-            auto pos = bn.find("P^");
-            if (pos != std::string::npos)
-                rp_n = std::stoi(bn.substr(pos + 2));
-            C.stiefel.assign(rp_n + 1, 0);
+            const int rp_n = detail::parse_projective_n(bn);
+            if (rp_n < 0)
+            {
+                C.inconclusive = true;
+                return C;
+            }
+            C.stiefel.assign(static_cast<std::size_t>(rp_n) + 1, 0);
             for (int k = 0; k <= rp_n; ++k)
-                C.stiefel[k] = static_cast<int>(detail::binom_ll_small(rp_n + 1, k) % 2);
+                C.stiefel[static_cast<std::size_t>(k)] = static_cast<int>(detail::binom_exact(rp_n + 1, k) % 2);
             C.chern = {bigint(1)};
-            if (rp_n % 2 == 1)
-                C.euler = 0;
-            else
-                C.euler = 0; // non-orientable even has no Euler
+            // RP^n orientable iff n odd (Euler 0); RP^{even} is non-orientable
+            // so Euler class is convention-0 even though chi = 1.
+            C.euler = 0;
             C.pontryagin = {bigint(1)};
             return C;
         }
@@ -291,23 +317,25 @@ NP_NODISCARD inline CharacteristicClasses whitney_sum_classes(const Characterist
 {
     CharacteristicClasses S;
     // Total Chern w = w(A)⌣w(B) ; for line bundles c = (1+c1(A))(1+c1(B))
-    // Over Z, c_k = Σ_{i+j=k} c_i(A) c_j(B)
-    size_t n = std::max(A.chern.size(), B.chern.size()) + std::max(A.chern.size(), B.chern.size());
-    S.chern.assign(n, bigint(0));
-    for (size_t i = 0; i < A.chern.size(); ++i)
-        for (size_t j = 0; j < B.chern.size(); ++j)
-            if (i + j < n)
-                S.chern[i + j] += A.chern[i] * B.chern[j];
+    // Over Z, c_k = Σ_{i+j=k} c_i(A) c_j(B); convolution needs na+nb-1 slots.
+    // Empty input means "no classes recorded" → treat as {1} (identity).
+    const size_t na = A.chern.empty() ? 1 : A.chern.size();
+    const size_t nb = B.chern.empty() ? 1 : B.chern.size();
+    S.chern.assign(na + nb - 1, bigint(0));
+    for (size_t i = 0; i < na; ++i)
+        for (size_t j = 0; j < nb; ++j)
+            S.chern[i + j] +=
+                (i < A.chern.size() ? A.chern[i] : bigint(1)) * (j < B.chern.size() ? B.chern[j] : bigint(1));
     // Trim trailing zeros
     while (S.chern.size() > 1 && S.chern.back() == 0)
         S.chern.pop_back();
-    // Stiefel mod2
-    size_t m = std::max(A.stiefel.size(), B.stiefel.size()) * 2;
-    S.stiefel.assign(m, 0);
-    for (size_t i = 0; i < A.stiefel.size(); ++i)
-        for (size_t j = 0; j < B.stiefel.size(); ++j)
-            if (i + j < m)
-                S.stiefel[i + j] ^= (A.stiefel[i] & B.stiefel[j]);
+    // Stiefel mod2 (same convolution over GF(2))
+    const size_t ma = A.stiefel.empty() ? 1 : A.stiefel.size();
+    const size_t mb = B.stiefel.empty() ? 1 : B.stiefel.size();
+    S.stiefel.assign(ma + mb - 1, 0);
+    for (size_t i = 0; i < ma; ++i)
+        for (size_t j = 0; j < mb; ++j)
+            S.stiefel[i + j] ^= ((i < A.stiefel.size() ? A.stiefel[i] : 1) & (j < B.stiefel.size() ? B.stiefel[j] : 1));
     while (S.stiefel.size() > 1 && S.stiefel.back() == 0)
         S.stiefel.pop_back();
     // e(E+ F) = e(E) cup e(F) is exact as cohomology classes (Milnor-Stasheff, §9); as stored Euler
@@ -325,23 +353,62 @@ struct HodgeStar
     int n = 0; // manifold dimension
     explicit HodgeStar(int dim = 0) : n(dim)
     {
+        if (dim < 0)
+            throw std::invalid_argument("HodgeStar: dimension must be non-negative");
     }
     /**
      * @brief * : Ω^k → Ω^{n-k} on oriented Riemannian manifold.
      * With flat metric, *² = (-1)^{k(n-k)}.
      */
-    NP_NODISCARD int sign(int k) const
+    NP_NODISCARD int sign(int k) const noexcept
     {
-        return ((k * (n - k)) % 2 == 0) ? 1 : -1;
+        const int e = k * (n - k);
+        return (e % 2 == 0) ? 1 : -1;
     }
 };
 
+namespace detail
+{
+
+// Sign of the permutation (I,J) relative to (0..n-1), for sorted k-set I.
+// Equals (-1)^{sum(I) - k(k-1)/2} (standard Hodge complement sign).
+NP_NODISCARD inline int complement_sign(const std::vector<int> &idx, int k) noexcept
+{
+    long long s = 0;
+    for (int v : idx)
+        s += v;
+    s -= static_cast<long long>(k) * (k - 1) / 2;
+    return (s % 2 == 0) ? 1 : -1;
+}
+
+NP_NODISCARD inline differential::KForm scale_form(const differential::KForm &w, double s)
+{
+    differential::KForm out;
+    out.k = w.k;
+    out.dim = w.dim;
+    for (auto &[idx, field] : w.coeffs)
+    {
+        auto f = field.f;
+        out.coeffs[idx] =
+            differential::ScalarField([f, s](const differential::Point &p) { return s * f(p); }, field.dim);
+    }
+    return out;
+}
+
+} // namespace detail
+
 NP_NODISCARD inline differential::KForm hodge_star(const differential::KForm &w, const HodgeStar &hs)
 {
+    if (w.k < 0 || w.k > hs.n)
+        throw std::invalid_argument("hodge_star: form degree out of range");
+    if (w.dim != hs.n)
+        throw std::invalid_argument("hodge_star: form dim must match manifold dim");
     differential::KForm out;
     out.k = hs.n - w.k;
     out.dim = w.dim;
-    // For flat torus, Hodge is identity on coefficients up to sign
+    // Flat orthonormal metric: *(f dx_I) = sign(I,J) * f dx_J, J = complement,
+    // where sign(I,J) is the permutation sign of (I,J). The (-1)^{k(n-k)}
+    // factor appears only in **, never in a single application.
     for (auto &[idx, field] : w.coeffs)
     {
         // Complement indices
@@ -350,38 +417,56 @@ NP_NODISCARD inline differential::KForm hodge_star(const differential::KForm &w,
             if (std::find(idx.begin(), idx.end(), i) == idx.end())
                 comp.push_back(i);
         std::sort(comp.begin(), comp.end());
-        out.coeffs[comp] = field;
+        const int total = detail::complement_sign(idx, w.k);
+        auto f = field.f;
+        const int d = field.dim;
+        if (total == 1)
+        {
+            out.coeffs[comp] = field;
+        }
+        else
+        {
+            out.coeffs[comp] = differential::ScalarField([f](const differential::Point &p) { return -f(p); }, d);
+        }
     }
     return out;
 }
 
 NP_NODISCARD inline differential::KForm codifferential(const differential::KForm &w, const HodgeStar &hs)
 {
-    // δ = (-1)^{n(k+1)+1} * d *
-    // Here we approximate as zero for harmonic test (flat).
-    (void)hs;
-    differential::KForm out;
-    out.k = w.k - 1;
-    out.dim = w.dim;
-    return out;
+    // δ = (-1)^{n(k+1)+1} ⋆ d ⋆ on k-forms (Bott–Tu Prop. 6.5).
+    if (w.k <= 0)
+        return differential::KForm(0, w.dim); // δ = 0 on 0-forms
+    auto dw_star = differential::exterior_derivative(hodge_star(w, hs));
+    auto back = hodge_star(dw_star, hs);
+    const int e = hs.n * (w.k + 1) + 1;
+    return detail::scale_form(back, (e % 2 == 0) ? 1.0 : -1.0);
 }
 
 NP_NODISCARD inline differential::KForm laplacian(const differential::KForm &w, const HodgeStar &hs)
 {
-    // Δ = dδ + δd
-    (void)hs;
-    differential::KForm out;
-    out.k = w.k;
-    out.dim = w.dim;
-    return out;
+    // Δ = dδ + δd (Hodge Laplacian); exact on flat coefficients.
+    // Boundary terms vanish: δ = 0 on 0-forms, d = 0 on n-forms.
+    if (w.k < 0 || w.k > hs.n)
+        throw std::invalid_argument("laplacian: form degree out of range");
+    if (w.k == 0)
+        return codifferential(differential::exterior_derivative(w), hs);
+    if (w.k == hs.n)
+        return differential::exterior_derivative(codifferential(w, hs));
+    auto dd = differential::exterior_derivative(codifferential(w, hs));
+    auto dd2 = codifferential(differential::exterior_derivative(w), hs);
+    return dd + dd2;
 }
 
 NP_NODISCARD inline bool is_harmonic(const differential::KForm &w, const HodgeStar &hs)
 {
+    if (w.coeffs.empty())
+        return true; // zero form is trivially harmonic (also skips dim checks)
     auto Lap = laplacian(w, hs);
     return Lap.coeffs.empty() || w.coeffs.empty();
 }
 
-} // namespace np::bundle
+} // namespace bundle
+} // namespace np::inline v1
 
 #endif // NP_BUNDLE_HPP
