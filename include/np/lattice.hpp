@@ -63,7 +63,9 @@
 #include "linalg.hpp"
 #include "ndarray.hpp"
 
-namespace np::lattice
+namespace np::inline v1
+{
+namespace lattice
 {
 
 // ── Concepts ────────────────────────────────────────────────────────────
@@ -1306,6 +1308,7 @@ template <Ordered T> NP_NODISCARD inline std::optional<T> join(const PosetLattic
     return p.join(a, b);
 }
 
-} // namespace np::lattice
+} // namespace lattice
+} // namespace np::inline v1
 
 #endif // NP_LATTICE_HPP

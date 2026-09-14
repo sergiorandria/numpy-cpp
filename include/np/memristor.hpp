@@ -8,7 +8,7 @@
  * simulation or on physical hardware (Mythic M1076, d-Matrix Jayhawk II,
  * Crossbar Inc, Weebit Nano, or any custom ReRAM macro via callbacks).
  *
- * Real-hardware concerns handled here (vs the 65-line stub it replaces):
+ * Real-hardware concerns handled here (replacing the original 65-line minimal version):
  *  - Device models: linear ion drift (Strukov/HP Labs), Simmons tunnel
  *    barrier, TEAM, VTEAM (Kvatinsky), Yakopcic, Stanford/PKU filament.
  *  - Window functions: Joglekar, Biolek, Prodromakis, Kvatinsky prodromakis.
@@ -90,7 +90,9 @@
 #include <utility>
 #include <vector>
 
-namespace np::analog
+namespace np::inline v1
+{
+namespace analog
 {
 
 template <typename T>
@@ -1901,6 +1903,7 @@ NP_NODISCARD inline double window_value(double w01, double polarity, WindowFunct
     return detail::window_fn(w01, polarity, wf, p);
 }
 
-} // namespace np::analog
+} // namespace analog
+} // namespace np::inline v1
 
 #endif // NP_MEMRISTOR_HPP
