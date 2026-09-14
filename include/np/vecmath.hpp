@@ -106,10 +106,19 @@
 #include <immintrin.h>
 #endif
 #if defined(NP_VECMATH_HAS_NEON)
+#if defined(_MSC_VER)
+// MSVC ARM64 names the header arm64_neon.h.
+#if __has_include(<arm64_neon.h>)
+#include <arm64_neon.h>
+#elif __has_include(<arm_neon.h>)
 #include <arm_neon.h>
 #endif
+#else
+#include <arm_neon.h>
+#endif
+#endif
 
-namespace np
+namespace np::inline v1
 {
 namespace vecmath
 {
@@ -2762,6 +2771,6 @@ template <typename T> inline void sincos(const T *in, T *out_s, T *out_c, std::s
 }
 
 } // namespace vecmath
-} // namespace np
+} // namespace np::inline v1
 
 #endif // NP_VECMATH_HPP
