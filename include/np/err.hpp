@@ -22,7 +22,7 @@
 #include "api_macros.hpp"
 #include "exceptions.hpp"
 
-namespace np
+namespace np::inline v1
 {
 
 namespace err
@@ -387,6 +387,6 @@ using err::geterrcall;
 using err::seterr;
 using err::seterrcall;
 
-} // namespace np
+} // namespace np::inline v1
 
 #endif // NP_ERR_HPP

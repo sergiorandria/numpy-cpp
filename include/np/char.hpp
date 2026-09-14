@@ -43,7 +43,7 @@
 #include "creation.hpp"
 #include "ndarray.hpp"
 
-namespace np
+namespace np::inline v1
 {
 namespace ch
 {
@@ -2515,12 +2515,12 @@ class NP_DEPRECATED("chararray is deprecated; use ndarray<std::string> with np::
      * as they're not string-specific and chararray is deprecated anyway. */
 };
 
-} /* namespace ch */
+} // namespace ch
 
 // NumPy 2.0 alias: numpy.strings (new) and numpy.char (legacy).
 // Reference: https://numpy.org/doc/2.2/reference/routines.strings.html
 namespace strings = ch;
 
-} /* namespace np */
+} /* namespace np::inline v1 */
 
 #endif /* NP_CHAR_HPP */

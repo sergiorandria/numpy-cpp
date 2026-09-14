@@ -10,6 +10,10 @@
 #ifndef NP_API_MACROS_HPP
 #define NP_API_MACROS_HPP
 
+// ABI version + inline namespace pre-declaration. Every subsystem header
+// includes this file before any `namespace np::inline v1...` reopening.
+#include "abi.hpp"
+
 /**
  * @def NP_API
  * @brief Marks a function/class as part of the public API.

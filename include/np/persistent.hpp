@@ -32,7 +32,9 @@
 #include "api_macros.hpp"
 #include "homology.hpp"
 
-namespace np::persistent
+namespace np::inline v1
+{
+namespace persistent
 {
 
 struct FilteredSimplex
@@ -297,6 +299,7 @@ NP_NODISCARD inline std::string barcode_string(const Barcode &bc)
     return s;
 }
 
-} // namespace np::persistent
+} // namespace persistent
+} // namespace np::inline v1
 
 #endif // NP_PERSISTENT_HPP

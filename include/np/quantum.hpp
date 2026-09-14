@@ -49,7 +49,9 @@
 #define NP_HAS_BOOST_COMPLEX 1
 #endif
 
-namespace np::quantum
+namespace np::inline v1
+{
+namespace quantum
 {
 
 #ifndef __NP_C64_DTYPE_STD
@@ -764,6 +766,7 @@ struct NoisyStateVector
     }
 };
 
-} // namespace np::quantum
+} // namespace quantum
+} // namespace np::inline v1
 
 #endif // NP_QUANTUM_HPP

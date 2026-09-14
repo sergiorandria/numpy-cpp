@@ -32,7 +32,7 @@
 
 #include "api_macros.hpp"
 
-namespace np
+namespace np::inline v1
 {
 namespace constants
 {
@@ -103,6 +103,6 @@ inline constexpr double PZERO = constants::PZERO;
 inline constexpr double NZERO = constants::NZERO;
 inline constexpr std::nullopt_t newaxis = constants::newaxis;
 
-} // namespace np
+} // namespace np::inline v1
 
 #endif // NP_CONSTANTS_HPP

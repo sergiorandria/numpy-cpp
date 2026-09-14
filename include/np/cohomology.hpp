@@ -44,7 +44,9 @@
 // inconclusive ring instead of risking coefficient blowup.
 #define NP_COHOMOLOGY_CUP_MAX_SIMPLEX 4096
 
-namespace np::cohomology
+namespace np::inline v1
+{
+namespace cohomology
 {
 
 struct CohomologyGroup
@@ -996,6 +998,7 @@ NP_NODISCARD inline std::string cohomology_ring_string(const homology::Simplicia
     return cohomology_ring(K).to_string();
 }
 
-} // namespace np::cohomology
+} // namespace cohomology
+} // namespace np::inline v1
 
 #endif // NP_COHOMOLOGY_HPP

@@ -39,7 +39,9 @@
 #include <sys/mman.h>
 #endif
 
-namespace np::mem
+namespace np::inline v1
+{
+namespace mem
 {
 
 enum class MemorySpace
@@ -179,6 +181,7 @@ template <typename T> NP_NODISCARD inline ndarray<T> zeros_hinted(const std::vec
     return zeros<T>(shape);
 }
 
-} // namespace np::mem
+} // namespace mem
+} // namespace np::inline v1
 
 #endif // NP_MEMORY_HPP

@@ -26,7 +26,9 @@
 #include <omp.h>
 #endif
 
-namespace np::tune::detail
+namespace np::inline v1
+{
+namespace tune::detail
 {
 // Tuning constants (constexpr; values identical to the former NP_TUNE_* macros).
 inline constexpr std::size_t kKb = 1024;
@@ -81,9 +83,12 @@ inline constexpr std::size_t kWindowThreshold = 2048;
 inline constexpr std::size_t kPolyThreshold = 1000;
 inline constexpr std::size_t kThreadChunkDiv = 4;
 inline constexpr std::size_t kThreadChunkMin = 1;
-} // namespace np::tune::detail
+} // namespace tune::detail
+} // namespace np::inline v1
 
-namespace np::tune
+namespace np::inline v1
+{
+namespace tune
 {
 
 // CPU topology (static values cached on first call; sysconf runs once)
@@ -311,6 +316,7 @@ NP_NODISCARD inline std::string tune_summary() noexcept
            " simd_f32=" + std::to_string(s.width_f32);
 }
 
-} // namespace np::tune
+} // namespace tune
+} // namespace np::inline v1
 
 #endif // NP_POWERFUL_HPP

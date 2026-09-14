@@ -10,6 +10,7 @@
 #ifndef NP_NP_HPP
 #define NP_NP_HPP
 
+#include "abi.hpp"
 #include "accelerator.hpp"
 #include "api_macros.hpp"
 #include "bigint.hpp"

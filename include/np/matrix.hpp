@@ -34,7 +34,7 @@
 #pragma GCC diagnostic ignored "-Wdeprecated-declarations"
 #endif
 
-namespace np
+namespace np::inline v1
 {
 
 /** @brief 2D matrix: a ndarray guaranteed to have ndim == 2.
@@ -539,7 +539,7 @@ template <typename T, typename U> NP_API NP_NODISCARD auto solve(const Matrix<T>
     return ndarray<R>::from_data(std::vector<int>{static_cast<int>(n)}, std::move(rhs));
 }
 
-} // namespace np
+} // namespace np::inline v1
 
 #if defined(__clang__) || defined(__GNUC__)
 #pragma GCC diagnostic pop

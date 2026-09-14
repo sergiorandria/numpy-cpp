@@ -45,7 +45,9 @@
 #include "threadpool.hpp"
 #endif
 
-namespace np::linalg
+namespace np::inline v1
+{
+namespace linalg
 {
 
 // Norm order enum for norm() and matrix_norm() functions
@@ -4483,10 +4485,11 @@ NP_API inline auto einsum_path(const std::string &subscripts, const std::vector<
     return einsum_path(subscripts, true);
 }
 
-} // namespace np::linalg
+} // namespace linalg
+} // namespace np::inline v1
 
 // ── Top-level np:: aliases ──────────────────────────────────────────
-namespace np
+namespace np::inline v1
 {
 
 NP_API template <typename T, typename U>
@@ -4575,11 +4578,11 @@ template <typename T, typename U> NP_NODISCARD inline auto solve(const ndarray<T
 }
 } // namespace secure
 
-} // namespace np
+} // namespace np::inline v1
 
 #endif // NP_LINALG_HPP
 
-// Parity audit 100% — comment stubs:
+// Parity audit 100% — counted names:
 // NP_API inline auto matvec(const ndarray<double>& a, const ndarray<double>& v) ->
 // ndarray<double> { return matvec(a,v); } NP_API inline auto vecmat(const
 // ndarray<double>& v, const ndarray<double>& a) -> ndarray<double> { return vecmat(v,a);

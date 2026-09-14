@@ -81,7 +81,7 @@
 #endif
 
 // Adaptive helpers – internal hidden
-namespace np
+namespace np::inline v1
 {
 namespace detail
 {
@@ -188,9 +188,9 @@ NP_HIDDEN inline void __np_pin_thread_linux(std::size_t idx) noexcept
 
 } // namespace __np
 } // namespace detail
-} // namespace np
+} // namespace np::inline v1
 
-namespace np
+namespace np::inline v1
 {
 namespace detail
 {
@@ -1058,6 +1058,6 @@ inline void parallel_for(std::size_t begin, std::size_t end, Func &&func, std::s
     ThreadPool::global().parallel_for(begin, end, std::forward<Func>(func), chunk);
 }
 
-} // namespace np
+} // namespace np::inline v1
 
 #endif // NP_THREADPOOL_HPP

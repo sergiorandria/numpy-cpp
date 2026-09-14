@@ -35,7 +35,7 @@
 
 #include "scalar_custom.hpp"
 
-namespace np
+namespace np::inline v1
 {
 
 /**
@@ -45,9 +45,11 @@ namespace np
  */
 template <typename T, int... Extents> class ndarrayf;
 
-} // namespace np
+} // namespace np::inline v1
 
-namespace np::detail::expr
+namespace np::inline v1
+{
+namespace detail::expr
 {
 
 /**
@@ -454,6 +456,7 @@ template <int... A> struct same_tag<shape_tag<A...>, shape_tag<A...>> : std::tru
 {
 };
 
-} // namespace np::detail::expr
+} // namespace detail::expr
+} // namespace np::inline v1
 
 #endif // NP_DETAIL_EXPR_HPP

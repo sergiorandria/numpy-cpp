@@ -18,7 +18,7 @@
 #include <limits>
 #include <type_traits>
 
-namespace np
+namespace np::inline v1
 {
 
 #if defined(__FLT16_MAX__)
@@ -333,7 +333,7 @@ NP_NODISCARD inline ndarray<float> dequantize_bfloat16(const ndarray<bfloat16> &
     return out;
 }
 
-} // namespace np
+} // namespace np::inline v1
 
 // numeric_limits specializations omitted (see CLAUDE item 7)
 #endif // NP_HALF_HPP

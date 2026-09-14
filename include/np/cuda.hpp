@@ -75,7 +75,9 @@ static constexpr cudaError_t cudaSuccess = 0;
 #endif
 #endif
 
-namespace np::cuda
+namespace np::inline v1
+{
+namespace cuda
 {
 
 // ── Stable CUDA ABI constants ─────────────────────────────────────────────
@@ -833,6 +835,7 @@ NP_NODISCARD inline bool has_fp4_tensor(int device = 0) noexcept
 // decision, not deferred. The graph_create/destroy + stream capture wrappers
 // above remain as general infrastructure.
 
-} // namespace np::cuda
+} // namespace cuda
+} // namespace np::inline v1
 
 #endif // NP_CUDA_HPP

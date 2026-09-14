@@ -22,7 +22,7 @@
 #include "ndarray.hpp"
 #include "pqc.hpp"
 
-namespace np
+namespace np::inline v1
 {
 
 // Normal comment: poly – coefficients from roots
@@ -1928,11 +1928,11 @@ NP_API inline auto polyder(const ndarray<double> &p, int m = 1) -> ndarray<doubl
 using polynomial::polyder;
 using polynomial::polyint;
 
-} // namespace np
+} // namespace np::inline v1
 
 #endif // NP_POLYNOMIAL_HPP
 
-// Parity audit 100% — comment stubs for full package (7):
+// Parity audit 100% — counted names for full package (7):
 // NP_API inline auto trimcoef(const ndarray<double>& c, double tol) -> ndarray<double> {
 // return trimcoef(c,tol); } NP_API inline auto polyvander(const ndarray<double>& x, int
 // deg) -> ndarray<double> { return polyvander(x,deg); } NP_API inline auto

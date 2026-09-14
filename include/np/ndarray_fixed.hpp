@@ -43,16 +43,19 @@
 #include "bigint.hpp"
 #endif
 
-namespace np::detail::fixed
+namespace np::inline v1
+{
+namespace detail::fixed
 {
 
 /** @brief Floating-point promotion used by mean/std/linspace (NumPy: int ->
  * float64). */
 template <typename V> using float_t = std::conditional_t<std::is_floating_point_v<V>, V, double>;
 
-} // namespace np::detail::fixed
+} // namespace detail::fixed
+} // namespace np::inline v1
 
-namespace np
+namespace np::inline v1
 {
 
 /**
@@ -1325,6 +1328,6 @@ constexpr auto stack(const A0 &a0, const Rest &...rest)
     return detail::fixed::stack_impl<R, Axis>(rtag{}, a0, rest...);
 }
 
-} // namespace np
+} // namespace np::inline v1
 
 #endif // NP_NDARRAY_FIXED_HPP

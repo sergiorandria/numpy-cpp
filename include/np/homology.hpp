@@ -35,7 +35,9 @@
 #include "bigint.hpp"
 #include "ndarray.hpp"
 
-namespace np::homology
+namespace np::inline v1
+{
+namespace homology
 {
 
 // ── SimplicialComplex ───────────────────────────────────────────────────
@@ -747,7 +749,7 @@ NP_NODISCARD inline SimplicialComplex sphere_boundary(int n)
     if (n < 0)
         return SimplicialComplex{};
     if (n == 0)
-        return SimplicialComplex{{{{0}}, {{1}}, {}, {}}};
+        return SimplicialComplex{{{{0}, {1}}, {}}};
     if (n == 1)
         return circle_complex();
     if (n == 2)
@@ -806,6 +808,7 @@ NP_NODISCARD inline std::string homology_string(const SimplicialComplex &K)
     return s;
 }
 
-} // namespace np::homology
+} // namespace homology
+} // namespace np::inline v1
 
 #endif // NP_HOMOLOGY_HPP

@@ -27,7 +27,7 @@
 #include "api_macros.hpp"
 #include "ndarray.hpp"
 
-namespace np
+namespace np::inline v1
 {
 namespace emath
 {
@@ -674,6 +674,6 @@ NP_API template <typename T> NP_NODISCARD auto arctanh(const ndarray<std::comple
 }
 
 } // namespace emath
-} // namespace np
+} // namespace np::inline v1
 
 #endif // NP_EMATH_HPP

@@ -22,7 +22,7 @@
 #include <utility>
 #include <vector>
 
-namespace np
+namespace np::inline v1
 {
 
 template <typename T> class ndarray;
@@ -295,6 +295,6 @@ template <typename T, std::size_t MaxDims = 8> using Proxy = ProxyBase<T, false,
 /** @brief Read-only proxy. */
 template <typename T, std::size_t MaxDims = 8> using ConstProxy = ProxyBase<T, true, MaxDims>;
 
-} // namespace np
+} // namespace np::inline v1
 
 #endif // NP_DETAIL_PROXY_HPP
