@@ -19,7 +19,7 @@
 #include "api_macros.hpp"
 #include "ndarray.hpp"
 
-namespace np
+namespace np::inline v1
 {
 
 /**
@@ -380,18 +380,76 @@ NP_API template <typename F> auto make_vectorize(F &&f)
 /**
  * @brief From Python function to ufunc (np.frompyfunc).
  *
- * Simplified: identical to vectorize but enforces `nin`/`nout`.
+ * Wraps a scalar callable as an element-wise ufunc taking exactly `nin`
+ * arguments and returning a single value (`nout` must be 1, matching the
+ * vectorize-based port). The arity is recorded on the returned object and
+ * enforced at call time; mismatched argument counts throw.
  *
  * Reference: numpy-reference/reference/generated/numpy.frompyfunc.html
  */
+NP_API template <typename F> class frompyfunc_object
+{
+  public:
+    frompyfunc_object(F f, std::size_t nin, std::size_t nout) : func_(std::move(f)), nin_(nin), nout_(nout)
+    {
+        if (nout_ != 1)
+            throw std::invalid_argument("frompyfunc: only nout==1 supported in this port");
+    }
+
+    NP_NODISCARD std::size_t nin() const noexcept
+    {
+        return nin_;
+    }
+    NP_NODISCARD std::size_t nout() const noexcept
+    {
+        return nout_;
+    }
+
+    template <typename T> auto operator()(const ndarray<T> &a) const
+    {
+        require_nin(1);
+        return vectorize<F>(func_)(a);
+    }
+
+    template <typename T> auto operator()(T scalar) const
+    {
+        require_nin(1);
+        return vectorize<F>(func_)(scalar);
+    }
+
+    template <typename T, typename U> auto operator()(const ndarray<T> &a, const ndarray<U> &b) const
+    {
+        require_nin(2);
+        return vectorize<F>(func_)(a, b);
+    }
+
+    template <typename... Args> auto operator()(const Args &...args) const
+    {
+        constexpr std::size_t n = sizeof...(Args);
+        require_nin(n);
+        // Generic fallback for arities without a dedicated broadcast
+        // overload: apply element-wise over the broadcast shape is only
+        // defined for 1-2 inputs in vectorize; higher arities evaluate
+        // per-element via the scalar callable directly on 1-elem arrays.
+        return vectorize<F>(func_)(args...);
+    }
+
+  private:
+    void require_nin(std::size_t n) const
+    {
+        if (n != nin_)
+            throw std::invalid_argument("frompyfunc: expected " + std::to_string(nin_) + " arguments, got " +
+                                        std::to_string(n));
+    }
+
+    F func_;
+    std::size_t nin_ = 0;
+    std::size_t nout_ = 1;
+};
+
 NP_API template <typename F> auto frompyfunc(F &&func, std::size_t nin, std::size_t nout)
 {
-    if (nout != 1)
-    {
-        throw std::invalid_argument("frompyfunc: only nout==1 supported in this port");
-    }
-    (void)nin;
-    return vectorize<std::decay_t<F>>(std::forward<F>(func));
+    return frompyfunc_object<std::decay_t<F>>(std::forward<F>(func), nin, nout);
 }
 
 // ── piecewise ─────────────────────────────────────────────────────
@@ -515,6 +573,6 @@ NP_NODISCARD auto piecewise(const ndarray<T> &x, const std::vector<ndarray<bool>
     return out;
 }
 
-} // namespace np
+} // namespace np::inline v1
 
 #endif // NP_FUNCTIONAL_HPP
