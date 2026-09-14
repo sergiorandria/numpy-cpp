@@ -9,10 +9,11 @@ set(CMAKE_CXX_STANDARD 20)
 set(CMAKE_CXX_STANDARD_REQUIRED ON)
 set(CMAKE_CXX_EXTENSIONS OFF)
 
+# Treat warnings as errors in CI (ALLOW opt-out via NP_WERROR=OFF)
+option(NP_WERROR "Treat warnings as errors" ON)
 if(NOT CMAKE_CXX_COMPILER_ID MATCHES "MSVC")
     add_compile_options(-Wall -Wextra -Wpedantic)
     # Treat warnings as errors in CI (ALLOW opt-out via NP_WERROR=OFF)
-    option(NP_WERROR "Treat warnings as errors" ON)
     if(NP_WERROR)
         add_compile_options(-Werror)
         # Allowlist: intentional parity shims and low-risk warnings (fix incrementally)
@@ -49,6 +50,19 @@ if(NOT CMAKE_CXX_COMPILER_ID MATCHES "MSVC")
         if(CLANG_TIDY_EXE)
             set(CMAKE_CXX_CLANG_TIDY "${CLANG_TIDY_EXE};-checks=bugprone-*,modernize-*,performance-*,cppcoreguidelines-*")
         endif()
+    endif()
+endif()
+
+if(MSVC)
+    # /Zc:__cplusplus reports the true language version (abi.hpp static_asserts
+    # __cplusplus >= 202002L; without it MSVC reports 199711L).
+    # /utf-8 keeps non-ASCII source (→, ⊕, Λ, ε) intact under all locales.
+    add_compile_options(/Zc:__cplusplus /utf-8)
+    # /W4 for parity with -Wall -Wextra -Wpedantic. /WX stays off on MSVC
+    # until the Windows CI job proves the tree warning-clean there (C4996
+    # deprecation notes etc. are warnings, not errors, without /WX).
+    if(NP_WERROR)
+        add_compile_options(/W4)
     endif()
 endif()
 
@@ -96,7 +110,9 @@ if(NP_ENABLE_SIMD)
                 add_compile_options(/arch:AVX512)
             elseif(NP_ENABLE_AVX2)
                 add_compile_options(/arch:AVX2)
-            else()
+            elseif(CMAKE_SIZEOF_VOID_P EQUAL 4)
+                # /arch:SSE2 is x86-only; on x64 SSE2 is the baseline and
+                # the flag warns (D9002). Only pass it for 32-bit builds.
                 add_compile_options(/arch:SSE2)
             endif()
         else()
@@ -238,6 +254,10 @@ endif()
 
 add_library(numpy-cpp INTERFACE)
 add_library(numpy-cpp::numpy-cpp ALIAS numpy-cpp)
+# ABI version: selects inline namespace vN (see include/np/abi.hpp).
+# abi.hpp defaults to 1 and #errors on mismatch, so the build stays in sync.
+set(NP_ABI_VERSION 1 CACHE STRING "numpy-cpp ABI version (inline namespace vN)")
+target_compile_definitions(numpy-cpp INTERFACE NP_ABI_VERSION=${NP_ABI_VERSION})
 target_include_directories(numpy-cpp INTERFACE
     $<BUILD_INTERFACE:${CMAKE_CURRENT_SOURCE_DIR}/include>
     $<INSTALL_INTERFACE:include>)
