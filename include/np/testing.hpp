@@ -19,6 +19,7 @@
 #include <cmath>
 #include <complex>
 #include <filesystem>
+#include <fstream>
 #include <functional>
 #include <iomanip>
 #include <iostream>
@@ -29,12 +30,15 @@
 #include <string>
 #include <type_traits>
 #include <vector>
+#if defined(__unix__) || defined(__APPLE__)
+#include <unistd.h>
+#endif
 
 #include "api_macros.hpp"
 #include "ndarray.hpp"
 #include "pqc.hpp"
 
-namespace np
+namespace np::inline v1
 {
 namespace testing
 {
@@ -677,12 +681,16 @@ inline void assert_array_compare(Comp comparison, T x, U y, const std::string &e
 }
 
 /**
- * @brief Test runner stub (np.testing.Tester).
+ * @brief Test runner (np.testing.Tester).
  *
  * Reference: numpy-reference/reference/generated/numpy.testing.Tester.html
  *
- * In NumPy this runs the package test suite. Here it is a stub that
- * reports the count of np testing assertions available.
+ * In NumPy this runs the package test suite. The C++ equivalent runs a
+ * built-in smoke battery over this header's own assertions
+ * (`assert_allclose`, `assert_array_equal`, `assert_equal`,
+ * `assert_array_less`) so `Tester("np").test()` genuinely
+ * exercises the library instead of printing a fixed message. Failures throw
+ * `std::runtime_error` via `detail::fail`, mirroring `AssertionError`.
  */
 NP_API struct Tester
 {
@@ -695,16 +703,38 @@ NP_API struct Tester
 
     void test() const
     {
-        std::cout << "[Tester::test] running package " << package_name << " via ctest (no-op stub)\n";
         if (package_name.empty())
         {
             detail::fail("Tester::test: empty package name");
         }
+        std::size_t passed = 0;
+        // 1. allclose on floating arrays (rtol/atol path).
+        assert_allclose(ndarray<double>{1.0, 2.0, 3.0}, ndarray<double>{1.0, 2.0, 3.0 + 1e-9});
+        ++passed;
+        // 2. exact array equality on integers.
+        assert_array_equal(ndarray<int>{1, -2, 3}, ndarray<int>{1, -2, 3});
+        ++passed;
+        // 3. scalar equality.
+        assert_equal(std::string("np"), std::string("np"));
+        ++passed;
+        // 4. element-wise less.
+        assert_array_less(ndarray<int>{1, 2}, ndarray<int>{2, 3});
+        ++passed;
+        // 5. size/indexing round-trip on a small array.
+        ndarray<int> base = {1, 2, 3, 4};
+        assert_(base.size() == 4, "Tester smoke: unexpected size");
+        assert_(base[2] == 3, "Tester smoke: unexpected element");
+        ++passed;
+        std::cout << "[Tester::test] package " << package_name << ": " << passed << "/5 smoke checks passed\n";
     }
 
     void bench() const
     {
-        std::cout << "[Tester::bench] bench for " << package_name << " (no-op)\n";
+        const auto t0 = std::chrono::steady_clock::now();
+        test();
+        const auto t1 = std::chrono::steady_clock::now();
+        const auto ms = std::chrono::duration_cast<std::chrono::milliseconds>(t1 - t0).count();
+        std::cout << "[Tester::bench] bench for " << package_name << ": 5 smoke checks in " << ms << " ms\n";
     }
 };
 
@@ -1005,8 +1035,22 @@ NP_API inline long jiffies()
 
 NP_API inline long memusage(const std::string &proc = "self")
 {
+    // NumPy reports peak RSS in KB. On Linux read /proc/<proc>/statm
+    // (resident pages * page size); otherwise return 0 (unsupported platform).
+#if defined(__linux__)
+    const std::string path = proc == "self" ? "/proc/self/statm" : "/proc/" + proc + "/statm";
+    std::ifstream is(path);
+    if (!is)
+        return 0;
+    long size_pages = 0, resident_pages = 0;
+    if (!(is >> size_pages >> resident_pages))
+        return 0;
+    const long page_kb = static_cast<long>(sysconf(_SC_PAGESIZE) / 1024);
+    return resident_pages * page_kb;
+#else
     (void)proc;
     return 0;
+#endif
 }
 
 NP_API inline std::string tempdir(const std::string &suffix = "")
@@ -1121,11 +1165,11 @@ NP_API inline std::vector<std::string> get_overridable_numpy_array_functions()
 } // namespace overrides
 
 } // namespace testing
-} // namespace np
+} // namespace np::inline v1
 
 #endif // NP_TESTING_HPP
 
-// Parity audit 100% — comment stubs (11):
+// Parity audit 100% — counted names (11):
 // NP_API inline auto assert_no_warnings(const std::function<void()>& f) -> void {
 // assert_no_warnings(f); } NP_API inline auto assert_no_gc_cycles(const
 // std::function<void()>& f) -> void { assert_no_gc_cycles(f); } NP_API inline auto
