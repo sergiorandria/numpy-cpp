@@ -16,17 +16,24 @@ fun padic_valuation :: "nat => int => nat => nat" where
 fun padic_valuation_fun :: "nat => nat => nat" where
   "padic_valuation_fun p x = (if x = 0 | p <= 1 then 0 else if p dvd x then Suc (padic_valuation_fun p (x div p)) else 0)"
 
+(* The recursive equation loops under plain simp on symbolic goals
+   (it keeps unfolding padic_valuation_fun p (z div p) and chases
+   implicative premises), so remove it from the default simpset.
+   Concrete numerals are evaluated with eval; symbolic goals unfold
+   exactly once via subst (see padic_val_le1 / padic_val_unfold_gt1). *)
+declare padic_valuation_fun.simps [simp del]
+
 lemma padic_valuation_25_5: "padic_valuation_fun 5 25 = 2"
-  by (simp add: padic_valuation_fun.simps)
+  by eval
 
 lemma padic_valuation_7_5: "padic_valuation_fun 5 7 = 0"
-  by simp
+  by eval
 
 definition padic_norm :: "nat => nat => real" where
   "padic_norm p x = (if x = 0 then 0 else 1 / (real p ^ padic_valuation_fun p x))"
 
 lemma padic_norm_25: "padic_norm 5 25 = 1/25"
-  unfolding padic_norm_def by simp
+  by eval
 
 text \<open>Correspondence to padic.hpp Padic::valuation, norm, is_unit\<close>
 
@@ -40,25 +47,65 @@ lemma not_unit_25_5: "~ is_padic_unit 5 25"
   by (simp add: is_padic_unit_def)
 
 lemma padic_valuation_zero: "padic_valuation_fun p 0 = 0"
-  by simp
+  by (subst padic_valuation_fun.simps) simp
 
-lemma padic_valuation_one: "p > 1 ==> padic_valuation_fun p 1 = 0"
-  by simp
+lemma padic_valuation_one:
+  fixes p :: nat
+  assumes gt1: "p > 1"
+  shows "padic_valuation_fun p 1 = 0"
+  by (subst padic_valuation_fun.simps,
+      simp add: gt1 del: padic_valuation_fun.simps)
 
-lemma padic_valuation_p: "p > 1 ==> padic_valuation_fun p p = 1"
-  by auto
+lemma padic_valuation_p:
+  fixes p :: nat
+  assumes gt1: "p > 1"
+  shows "padic_valuation_fun p p = 1"
+proof -
+  have ppos: "0 < p" using gt1 by linarith
+  have nle1': "~ p <= Suc 0" using gt1 by linarith
+  have pp0: "p ~= 0" using gt1 by linarith
+  have dvdpp: "p dvd p" by simp
+  have divpp: "p div p = 1" by (simp add: pp0)
+  have ndvd1: "~ p dvd Suc 0"
+  proof
+    assume d: "p dvd Suc 0"
+    have zpos: "(0::nat) < Suc 0" by simp
+    have leSuc: "p <= Suc 0" by (rule dvd_imp_le[OF d zpos])
+    show False using leSuc gt1 by linarith
+  qed
+  have e1: "padic_valuation_fun p p = Suc (padic_valuation_fun p (p div p))"
+    by (subst padic_valuation_fun.simps,
+        simp add: pp0 nle1' dvdpp del: padic_valuation_fun.simps)
+  have v1: "padic_valuation_fun p 1 = 0" by (rule padic_valuation_one[OF gt1])
+  have e2: "padic_valuation_fun p (p div p) = 0"
+    by (metis divpp v1)
+  show ?thesis by (metis e1 e2 divpp One_nat_def)
+qed
 
 lemma padic_valuation_p_pow: "padic_valuation_fun 5 125 = 3"
-  by (simp add: padic_valuation_fun.simps)
+  by eval
 
 lemma padic_norm_zero: "padic_norm p 0 = 0"
   by (simp add: padic_norm_def)
 
-lemma padic_norm_one: "p > 1 ==> padic_norm p 1 = 1"
-  by (simp add: padic_norm_def)
+lemma padic_norm_one_of_zero_val:
+  fixes p x :: nat
+  assumes x0: "x ~= 0" and v0: "padic_valuation_fun p x = 0"
+  shows "padic_norm p x = 1"
+  using assms unfolding padic_norm_def by auto
+
+lemma padic_norm_one:
+  fixes p :: nat
+  assumes gt1: "p > 1"
+  shows "padic_norm p 1 = 1"
+proof -
+  have v1: "padic_valuation_fun p 1 = 0" by (rule padic_valuation_one[OF gt1])
+  have h1: "(1::nat) ~= 0" by simp
+  show ?thesis by (rule padic_norm_one_of_zero_val[OF h1 v1])
+qed
 
 lemma padic_norm_p: "padic_norm 5 5 = 1/5"
-  unfolding padic_norm_def by simp
+  by eval
 
 text \<open>Local primality: the library @{term prime} constant is opaque in Main
   (no definition or lemmas visible), so we use the standard definition
@@ -87,6 +134,24 @@ text \<open>Valuation helpers: exact-divisibility reading of the recursive
   counter. Unfolding uses single-step @{term subst} (the recursive equation
   would loop under plain simp on symbolic goals).\<close>
 
+text \<open>Single-step unfold helper: proved by one-shot @{term subst}
+  (never plain @{term simp} with the recursive equation on symbolic goals,
+  which loops: the simplifier would keep unfolding
+  @{term "padic_valuation_fun p (z div p)"} and chase implicative premises).\<close>
+
+lemma padic_val_le1:
+  fixes p z :: nat
+  assumes le1: "p <= 1"
+  shows "padic_valuation_fun p z = 0"
+  by (metis padic_valuation_fun.simps le1)
+
+lemma padic_val_unfold_gt1:
+  fixes p z :: nat
+  assumes nz: "z ~= 0" and gt1: "~ p <= 1"
+  shows "padic_valuation_fun p z =
+      (if p dvd z then Suc (padic_valuation_fun p (z div p)) else 0)"
+  by (metis padic_valuation_fun.simps nz gt1)
+
 lemma padic_valuation_pow_dvd:
   fixes p :: nat
   shows "padic_valuation_fun p z >= m ==> (p ^ m) dvd z"
@@ -94,26 +159,47 @@ proof (induct m arbitrary: z)
   case 0
   show ?case by simp
 next
-  case (Suc m)
-  have padic0: "padic_valuation_fun p 0 = 0" by simp
-  have contra0: "~ (0::nat) >= Suc m" by simp
-  have nz: "padic_valuation_fun p z >= Suc m ==> z ~= 0" using padic0 contra0 by metis
-  have gt1: "padic_valuation_fun p z >= Suc m ==> p > 1"
-    sorry (* TODO: needs unfolding of recursive padic simps on symbolic goal;
-             simp/metis loop. Prove via manual induction on p or sledgehammer. *)
-  have nle1: "padic_valuation_fun p z >= Suc m ==> ~ p <= Suc 0" using gt1 by linarith
-  have dvd: "padic_valuation_fun p z >= Suc m ==> p dvd z"
-    sorry (* TODO: needs unfolding of recursive padic simps on symbolic goal;
-             simp/metis loop. Prove via manual induction on p or sledgehammer. *)
-  have e: "padic_valuation_fun p z >= Suc m ==> padic_valuation_fun p z = Suc (padic_valuation_fun p (z div p))"
-    by (simp add: padic_valuation_fun.simps nle1 dvd nz)
-  have rec: "padic_valuation_fun p z >= Suc m ==> padic_valuation_fun p (z div p) >= m"
-    using e by linarith
-  have ih: "padic_valuation_fun p z >= Suc m ==> (p ^ m) dvd (z div p)" using Suc rec by metis
-  have zp: "padic_valuation_fun p z >= Suc m ==> z = p * (z div p)" using dvd dvd_mult_div_cancel by metis
-  have hdiv2: "padic_valuation_fun p z >= Suc m ==> (p ^ m) dvd (z div p) ==> (p ^ Suc m) dvd z"
-    using zp dvd_div_iff_mult power_Suc mult.commute mult_0_right by metis
-  show ?case using ih zp hdiv2 dvd_def by metis
+  fix m z
+  assume IH: "!!w. padic_valuation_fun p w >= m ==> (p ^ m) dvd w"
+    and ge: "padic_valuation_fun p z >= Suc m"
+  have padic0: "padic_valuation_fun p 0 = 0" by (rule padic_valuation_zero)
+    have nz: "z ~= 0"
+    proof (rule ccontr)
+      assume "~ z ~= 0"
+      hence z0: "z = 0" by simp
+      have "padic_valuation_fun p z = 0" by (simp add: z0 padic0)
+      with ge show False by simp
+    qed
+    have gt1: "p > 1"
+    proof (rule ccontr)
+      assume "~ p > 1"
+      hence le1: "p <= 1" by linarith
+      have "padic_valuation_fun p z = 0" by (rule padic_val_le1[OF le1])
+      with ge show False by simp
+    qed
+    have nle1': "~ p <= Suc 0" using gt1 by linarith
+    have dvd: "p dvd z"
+    proof (rule ccontr)
+      assume ndvd: "~ p dvd z"
+      have v0: "padic_valuation_fun p z = 0"
+        by (subst padic_valuation_fun.simps,
+            simp add: nz nle1' ndvd del: padic_valuation_fun.simps)
+      with ge show False by simp
+    qed
+    have e: "padic_valuation_fun p z = Suc (padic_valuation_fun p (z div p))"
+      by (subst padic_valuation_fun.simps,
+          simp add: nz nle1' dvd del: padic_valuation_fun.simps)
+    have rec: "padic_valuation_fun p (z div p) >= m"
+      using e ge by linarith
+    have ih: "(p ^ m) dvd (z div p)"
+      using IH rec by blast
+    obtain k where k: "z div p = (p ^ m) * k"
+      using ih unfolding dvd_def by blast
+    have zp: "z = p * (z div p)"
+      using dvd by (simp add: mult.commute dvd_mult_div_cancel)
+    have zform: "z = (p ^ Suc m) * k"
+      using zp k by (simp add: power_Suc mult.assoc mult.commute)
+    show "(p ^ Suc m) dvd z" using zform unfolding dvd_def by blast
 qed
 
 lemma padic_valuation_ge_of_pow_dvd:
@@ -123,24 +209,33 @@ proof (induct m arbitrary: z)
   case 0
   show ?case by simp
 next
-  case (Suc m)
-  have ppos: "2 <= p ==> (p ^ Suc m) dvd z ==> z ~= 0 ==> p ~= 0" by linarith
-  have nle1: "2 <= p ==> (p ^ Suc m) dvd z ==> z ~= 0 ==> ~ p <= Suc 0" by linarith
+  fix m z
+  assume IH: "!!w. 2 <= p ==> (p ^ m) dvd w ==> w ~= 0 ==> padic_valuation_fun p w >= m"
+    and le: "2 <= p" and dvdSm: "(p ^ Suc m) dvd z" and zn0: "z ~= 0"
+  have ppos: "p ~= 0" using le by linarith
+  have nle1': "~ p <= Suc 0" using le by linarith
   have ppow: "p dvd p ^ Suc m" by (simp add: power_Suc)
-  have pdvd: "2 <= p ==> (p ^ Suc m) dvd z ==> z ~= 0 ==> p dvd z" using ppow dvd_trans by metis
-  have zp_of: "2 <= p ==> (p ^ Suc m) dvd z ==> z ~= 0 ==> z = p * (z div p)" using pdvd dvd_mult_div_cancel by metis
-  have hdiv: "2 <= p ==> (p ^ Suc m) dvd z ==> z ~= 0 ==> (p ^ m) dvd (z div p)"
-    using ppos pdvd dvd_div_iff_mult power_Suc mult.commute by metis
-  have q0: "2 <= p ==> (p ^ Suc m) dvd z ==> z ~= 0 ==> z div p ~= 0" using zp_of mult_0_right by metis
-  have rec: "2 <= p ==> (p ^ Suc m) dvd z ==> z ~= 0 ==> padic_valuation_fun p (z div p) >= m"
-    using Suc hdiv q0 by metis
-  have nz': "2 <= p ==> (p ^ Suc m) dvd z ==> z ~= 0 ==> z ~= 0" by simp
-  have e: "2 <= p ==> (p ^ Suc m) dvd z ==> z ~= 0 ==> padic_valuation_fun p z = Suc (padic_valuation_fun p (z div p))"
-    by (simp add: padic_valuation_fun.simps nle1 pdvd nz')
-  have mid: "2 <= p ==> (p ^ Suc m) dvd z ==> z ~= 0 ==> Suc (padic_valuation_fun p (z div p)) >= Suc m"
+  have pdvd: "p dvd z" using ppow dvdSm by (rule dvd_trans)
+  have zp_of: "z = p * (z div p)"
+    using pdvd by (simp add: mult.commute dvd_mult_div_cancel)
+  obtain k where k: "z = (p ^ Suc m) * k"
+    using dvdSm unfolding dvd_def by blast
+  have zm: "z = p * ((p ^ m) * k)"
+    using k by (simp add: power_Suc mult.assoc mult.commute)
+  have div_eq: "z div p = (p ^ m) * k"
+    using zm ppos by (simp add: nonzero_mult_div_cancel_left)
+  have hdiv: "(p ^ m) dvd (z div p)"
+    using div_eq unfolding dvd_def by blast
+  have q0: "z div p ~= 0"
+    using zp_of zn0 by (metis mult_0_right)
+  have rec: "padic_valuation_fun p (z div p) >= m"
+    using IH hdiv q0 le by blast
+  have e: "padic_valuation_fun p z = Suc (padic_valuation_fun p (z div p))"
+    by (subst padic_valuation_fun.simps,
+        simp add: zn0 nle1' pdvd del: padic_valuation_fun.simps)
+  have mid: "Suc (padic_valuation_fun p (z div p)) >= Suc m"
     using rec by linarith
-  show "2 <= p ==> (p ^ Suc m) dvd z ==> z ~= 0 ==> padic_valuation_fun p z >= Suc m"
-    by (metis e mid)
+  show "padic_valuation_fun p z >= Suc m" using e mid by linarith
 qed
 
 lemma padic_valuation_mult_add_aux:
@@ -153,7 +248,8 @@ proof (induct n arbitrary: a b)
   proof -
     assume le0: "a + b <= 0" and a0': "a ~= 0" and b0': "b ~= 0"
     have ab: "a = 0 & b = 0" using le0 by linarith
-    then show ?thesis by simp
+    have v0: "padic_valuation_fun p 0 = 0" by (rule padic_valuation_zero)
+    then show ?thesis by (simp add: ab v0)
   qed
 next
   case (Suc n)
@@ -221,11 +317,146 @@ next
     using em brFalse brTrue by blast
 qed
 
-lemma padic_norm_ultrametric: "padic_norm p (x + y) <= max (padic_norm p x) (padic_norm p y) | padic_norm p (x + y) = 0"
-  sorry
+lemma padic_valuation_add_ge_min:
+  fixes p x y :: nat
+  shows "padic_valuation_fun p (x + y) >= min (padic_valuation_fun p x) (padic_valuation_fun p y) | x + y = 0"
+proof (cases "x + y = 0")
+  case True
+  then show ?thesis by simp
+next
+  case False
+  hence ne0: "x + y ~= 0" by simp
+  show ?thesis
+  proof (cases "p <= 1")
+    case True
+    have vx0: "padic_valuation_fun p x = 0" by (rule padic_val_le1[OF True])
+    have vy0: "padic_valuation_fun p y = 0" by (rule padic_val_le1[OF True])
+    have vxy0: "padic_valuation_fun p (x + y) = 0" by (rule padic_val_le1[OF True])
+    have "padic_valuation_fun p (x + y) >= min (padic_valuation_fun p x) (padic_valuation_fun p y)"
+      by (simp add: vx0 vy0 vxy0)
+    then show ?thesis by blast
+  next
+    case False
+    hence ge2: "2 <= p" by linarith
+    define m where "m = min (padic_valuation_fun p x) (padic_valuation_fun p y)"
+    have mx: "m <= padic_valuation_fun p x" by (simp add: m_def)
+    have my: "m <= padic_valuation_fun p y" by (simp add: m_def)
+    have dx: "(p ^ m) dvd x" by (rule padic_valuation_pow_dvd[OF mx])
+    have dy: "(p ^ m) dvd y" by (rule padic_valuation_pow_dvd[OF my])
+    have dxy: "(p ^ m) dvd (x + y)" by (rule dvd_add[OF dx dy])
+    have vxy: "padic_valuation_fun p (x + y) >= m"
+      by (rule padic_valuation_ge_of_pow_dvd[OF ge2 dxy ne0])
+    have "padic_valuation_fun p (x + y) >= min (padic_valuation_fun p x) (padic_valuation_fun p y)"
+      using vxy by (simp add: m_def)
+    then show ?thesis by blast
+  qed
+qed
 
-lemma padic_valuation_add_ge_min: "padic_valuation_fun p (x + y) >= min (padic_valuation_fun p x) (padic_valuation_fun p y) | x + y = 0"
-  sorry
+lemma padic_norm_nonneg: "padic_norm p x >= 0"
+  unfolding padic_norm_def
+  by (auto intro: divide_nonneg_nonneg zero_le_power)
+
+lemma padic_norm_ultrametric_aux:
+  fixes p x y :: nat
+  shows "padic_norm p (x + y) <= max (padic_norm p x) (padic_norm p y)"
+proof (cases "x = 0")
+  case True
+  hence "x + y = y" by simp
+  then show ?thesis by (simp add: True padic_norm_nonneg max_def)
+next
+  case False
+  hence x0: "x ~= 0" by simp
+  show ?thesis
+  proof (cases "y = 0")
+    case True
+    hence "x + y = x" by simp
+    then show ?thesis by (simp add: True padic_norm_nonneg max_def)
+  next
+    case False
+    hence y0: "y ~= 0" by simp
+    show ?thesis
+    proof (cases "x + y = 0")
+      case True
+      have "padic_norm p (x + y) = 0" by (simp add: True padic_norm_def)
+      with padic_norm_nonneg[of p x] padic_norm_nonneg[of p y]
+      show ?thesis by (simp add: True max_def)
+    next
+      case False
+      hence xy0: "x + y ~= 0" by simp
+      show ?thesis
+      proof (cases "p <= 1")
+        case True
+        have vx0: "padic_valuation_fun p x = 0" by (rule padic_val_le1[OF True])
+        have vy0: "padic_valuation_fun p y = 0" by (rule padic_val_le1[OF True])
+        have vxy0: "padic_valuation_fun p (x + y) = 0" by (rule padic_val_le1[OF True])
+        have nx: "padic_norm p x = 1"
+          by (rule padic_norm_one_of_zero_val[OF x0 vx0])
+        have ny: "padic_norm p y = 1"
+          by (rule padic_norm_one_of_zero_val[OF y0 vy0])
+        have nxy: "padic_norm p (x + y) = 1"
+          by (rule padic_norm_one_of_zero_val[OF xy0 vxy0])
+        show ?thesis by (simp add: nx ny nxy)
+      next
+        case False
+        hence ge2: "2 <= p" by linarith
+        have ge_min: "padic_valuation_fun p (x + y) >=
+            min (padic_valuation_fun p x) (padic_valuation_fun p y)"
+          using padic_valuation_add_ge_min[of p x y] xy0 by blast
+        have rp: "(1::real) <= real p" using ge2 by simp
+        have rp_pos: "(0::real) < real p" using ge2 by simp
+        define vx where "vx = padic_valuation_fun p x"
+        define vy where "vy = padic_valuation_fun p y"
+        define vxy where "vxy = padic_valuation_fun p (x + y)"
+        have hmin: "vxy >= min vx vy"
+          using ge_min by (simp add: vx_def vy_def vxy_def)
+        have nx: "padic_norm p x = 1 / ((real p) ^ vx)"
+          unfolding padic_norm_def by (simp add: x0 vx_def)
+        have ny: "padic_norm p y = 1 / ((real p) ^ vy)"
+          unfolding padic_norm_def by (simp add: y0 vy_def)
+        have nxy: "padic_norm p (x + y) = 1 / ((real p) ^ vxy)"
+          unfolding padic_norm_def by (metis xy0 vxy_def)
+        have pos_vx: "(0::real) < (real p) ^ vx"
+          by (rule zero_less_power[OF rp_pos])
+        have pos_vy: "(0::real) < (real p) ^ vy"
+          by (rule zero_less_power[OF rp_pos])
+        have pos_vxy: "(0::real) < (real p) ^ vxy"
+          by (rule zero_less_power[OF rp_pos])
+        show ?thesis
+        proof (cases "vx <= vy")
+          case True
+          have m_eq: "min vx vy = vx" by (simp add: True min_def)
+          have hle: "vx <= vxy" using hmin by (simp add: m_eq)
+          have pow_le: "(real p) ^ vx <= (real p) ^ vxy"
+            by (rule power_increasing[OF hle rp])
+          have div_le: "1 / ((real p) ^ vxy) <= 1 / ((real p) ^ vx)"
+            apply (rule frac_le)
+            using pos_vx pow_le pos_vxy by auto
+          have le_max: "1 / ((real p) ^ vx) <=
+              max (1 / ((real p) ^ vx)) (1 / ((real p) ^ vy))"
+            by simp
+          show ?thesis using div_le le_max by (simp add: nx ny nxy)
+        next
+          case False
+          hence vy_le: "vy <= vx" by linarith
+          have m_eq: "min vx vy = vy" by (simp add: min_def False)
+          have hle: "vy <= vxy" using hmin by (simp add: m_eq)
+          have pow_le: "(real p) ^ vy <= (real p) ^ vxy"
+            by (rule power_increasing[OF hle rp])
+          have div_le: "1 / ((real p) ^ vxy) <= 1 / ((real p) ^ vy)"
+            apply (rule frac_le)
+            using pos_vy pow_le pos_vxy by auto
+          have le_max: "1 / ((real p) ^ vy) <=
+              max (1 / ((real p) ^ vx)) (1 / ((real p) ^ vy))"
+            by simp
+          show ?thesis using div_le le_max by (simp add: nx ny nxy)
+        qed
+      qed
+    qed
+  qed
+qed
+
+lemma padic_norm_ultrametric: "padic_norm p (x + y) <= max (padic_norm p x) (padic_norm p y) | padic_norm p (x + y) = 0"
+  using padic_norm_ultrametric_aux by blast
 
 text \<open>Hensel's lemma: if f(a)=0 mod p and f'(a) not 0 mod p, then exists lift to p^n.\<close>
 
@@ -250,14 +481,68 @@ lemma hensel_lift_step: "is_padic_unit p (2 * a) ==> hensel_condition p a (2 * a
 text \<open>Padic lattice and differential integration: PadicLattice wraps lattice::Lattice,
   PadicDifferential wraps differential::VM — verified via lattice/differential theories.\<close>
 
-lemma padic_lattice_rank: "is_padic_unit p x ==> padic_valuation_fun p x = 0"
-  sorry
+lemma padic_lattice_rank:
+  fixes p x :: nat
+  assumes unit: "is_padic_unit p (int x)"
+  shows "padic_valuation_fun p x = 0"
+proof (cases "p <= 1")
+  case True
+  show ?thesis by (rule padic_val_le1[OF True])
+next
+  case False
+  hence gt1: "~ p <= Suc 0" by simp
+  have ppos: "p ~= 0" using False by linarith
+  have hmod: "int x mod int p ~= 0" using unit by (simp add: is_padic_unit_def)
+  have natmod: "x mod p ~= 0"
+  proof (rule ccontr)
+    assume "~ x mod p ~= 0"
+    hence mod0: "x mod p = 0" by simp
+    have imod0: "int (x mod p) = 0" by (simp add: mod0)
+    have "int x mod int p = 0" by (metis zmod_int imod0)
+    with hmod show False by simp
+  qed
+  have ndvd: "~ p dvd x" using natmod by (simp add: dvd_eq_mod_eq_0)
+  have nx0: "x ~= 0"
+  proof (rule ccontr)
+    assume "~ x ~= 0"
+    hence "x = 0" by simp
+    hence "p dvd x" by simp
+    with ndvd show False by simp
+  qed
+  show ?thesis
+    by (subst padic_valuation_fun.simps,
+        simp add: nx0 gt1 ndvd del: padic_valuation_fun.simps)
+qed
 
-lemma padic_norm_unit_one: "is_padic_unit p (int x) ==> padic_norm p x = 1"
-  sorry
+lemma padic_norm_unit_one:
+  fixes p x :: nat
+  assumes unit: "is_padic_unit p (int x)"
+  shows "padic_norm p x = 1"
+proof -
+  have v0: "padic_valuation_fun p x = 0" by (rule padic_lattice_rank[OF unit])
+  have x0: "x ~= 0"
+  proof (rule ccontr)
+    assume "~ x ~= 0"
+    hence "x = 0" by simp
+    hence "is_padic_unit p (int x) = False" by (simp add: is_padic_unit_def)
+    with unit show False by simp
+  qed
+  show ?thesis by (rule padic_norm_one_of_zero_val[OF x0 v0])
+qed
 
-lemma padic_differential_exterior: "(x::nat) ~= 0 ==> p > 1 ==> padic_valuation_fun p (p * x) = Suc (padic_valuation_fun p x)"
-  sorry (* TODO: unfolding with (p*x) conditions; needs p*x~=0 via mult_eq_0_iff
-           plus div-cancel; simp loops on recursive simps. *)
+lemma padic_differential_exterior:
+  fixes p x :: nat
+  assumes x0: "x ~= 0" and gt1: "p > 1"
+  shows "padic_valuation_fun p (p * x) = Suc (padic_valuation_fun p x)"
+proof -
+  have ppos: "p ~= 0" using gt1 by linarith
+  have nle1': "~ p <= 1" using gt1 by linarith
+  have px0: "p * x ~= 0" using x0 ppos by simp
+  have dvdpx: "p dvd p * x" by simp
+  have divpx: "(p * x) div p = x"
+    using ppos by (simp add: nonzero_mult_div_cancel_left)
+  show ?thesis
+    by (metis padic_valuation_fun.simps px0 nle1' dvdpx divpx)
+qed
 
 end
