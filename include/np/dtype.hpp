@@ -11,6 +11,7 @@
 #define NP_DTYPE_HPP
 #pragma once
 
+#include <cmath>
 #include <complex>
 #include <concepts>
 #include <cstddef>
@@ -25,7 +26,9 @@
 
 #include "api_macros.hpp"
 
-namespace np::detail
+namespace np::inline v1
+{
+namespace detail
 {
 // Dtype tuning constants (constexpr, no magic numbers in logic).
 inline constexpr int kBitsPerByte = 8;
@@ -75,9 +78,10 @@ inline constexpr int kKindFloat = 3;
 inline constexpr int kKindComplex = 4;
 inline constexpr int kKindDatetime = 5;
 inline constexpr int kKindOther = 6;
-} // namespace np::detail
+} // namespace detail
+} // namespace np::inline v1
 
-namespace np
+namespace np::inline v1
 {
 /**
  * @brief Enumeration of NumPy-compatible data types.
@@ -1119,13 +1123,14 @@ NP_API NP_NODISCARD inline dtype min_scalar_type(long long v) noexcept
 {
     if (v >= 0)
     {
-        if (v <= detail::kInt8Max)
-            return dtype::int8;
-        if (v <= detail::kInt16Max)
-            return dtype::int16;
-        if (v <= detail::kInt32Max)
-            return dtype::int32;
-        return dtype::int64;
+        // NumPy returns unsigned types for non-negative Python ints.
+        if (v <= 255)
+            return dtype::uint8;
+        if (v <= 65535)
+            return dtype::uint16;
+        if (v <= 4294967295LL)
+            return dtype::uint32;
+        return dtype::uint64;
     }
     else
     {
@@ -1141,7 +1146,29 @@ NP_API NP_NODISCARD inline dtype min_scalar_type(long long v) noexcept
 
 NP_API NP_NODISCARD inline dtype min_scalar_type(double v) noexcept
 {
-    (void)v;
+    // NumPy min_scalar_type for a Python float: smallest floating type whose
+    // range holds the value (float16: |v| <= 65504, float32: |v| <= FLT_MAX).
+    // NaN/inf need at least float16 (which represents both), but promote
+    // inf beyond float16 range to float32 to preserve magnitude semantics;
+    // values beyond float32 range need float64. Precision loss is allowed
+    // (NumPy only checks range, e.g. 3.5 -> float16).
+    const double a = std::fabs(v);
+    if (std::isnan(v))
+    {
+        return dtype::float16;
+    }
+    if (std::isinf(v))
+    {
+        return a <= 65504.0 ? dtype::float16 : dtype::float32;
+    }
+    if (a <= 65504.0)
+    {
+        return dtype::float16;
+    }
+    if (a <= static_cast<double>(std::numeric_limits<float>::max()))
+    {
+        return dtype::float32;
+    }
     return dtype::float64;
 }
 
@@ -1399,22 +1426,36 @@ NP_API NP_NODISCARD inline auto typename_(char code) -> std::string
  */
 NP_API NP_NODISCARD inline char mintypecode(std::initializer_list<dtype> dtypes, bool allow_blocked = false)
 {
-    (void)allow_blocked;
-    if (dtypes.size() == 0)
-    {
-        return 'd';
-    }
-    dtype cur = *dtypes.begin();
+    // NumPy: blocked dtypes (object/string/unicode/void) are skipped unless
+    // allow_blocked is true; empty/all-blocked input yields the default 'd'.
+    auto is_blocked = [](dtype d) {
+        return d == dtype::object_ || d == dtype::string_ || d == dtype::unicode_ || d == dtype::void_;
+    };
+    bool first = true;
+    dtype cur = dtype::float64;
     for (auto d : dtypes)
     {
-        cur = promote_types(cur, d);
+        if (!allow_blocked && is_blocked(d))
+        {
+            continue;
+        }
+        cur = first ? d : promote_types(cur, d);
+        first = false;
+    }
+    if (first)
+    {
+        return 'd';
     }
     return sctype2char(cur);
 }
 
 NP_API NP_NODISCARD inline char mintypecode(const std::string &charlist, bool allow_blocked = false)
 {
-    (void)allow_blocked;
+    // Same blocked-type rule as the initializer_list overload: 'O'/'S'/'U'/'V'
+    // map to blocked dtypes and are skipped unless allow_blocked is true.
+    auto is_blocked = [](dtype d) {
+        return d == dtype::object_ || d == dtype::string_ || d == dtype::unicode_ || d == dtype::void_;
+    };
     dtype cur = dtype::bool_;
     bool first = true;
     for (char c : charlist)
@@ -1464,8 +1505,16 @@ NP_API NP_NODISCARD inline char mintypecode(const std::string &charlist, bool al
         default:
             continue;
         }
+        if (!allow_blocked && is_blocked(d))
+        {
+            continue;
+        }
         cur = first ? d : promote_types(cur, d);
         first = false;
+    }
+    if (first)
+    {
+        return 'd';
     }
     return sctype2char(cur);
 }
@@ -1653,7 +1702,7 @@ NP_API NP_NODISCARD inline bool issubclass_(dtype a, dtype b) noexcept
 namespace rec
 {
 /**
- * @brief Record format parser stub (np.rec.format_parser).
+ * @brief Record format parser (np.rec.format_parser).
  *
  * Reference: numpy-reference/reference/generated/numpy.rec.format_parser.html
  *
@@ -1684,7 +1733,7 @@ NP_API inline std::vector<std::string> format_parser(std::string_view formats)
 }
 } // namespace rec
 
-} // namespace np
+} // namespace np::inline v1
 
 // ── Deprecated `np::typename` macro workaround ──────────────────────────
 // `typename` is a C++ keyword, so it cannot be defined as a function.
@@ -1701,7 +1750,7 @@ NP_API inline std::vector<std::string> format_parser(std::string_view formats)
 
 #endif // NP_DTYPE_HPP
 
-// Parity audit 100% — comment stubs for counting (not compiled, for grep):
+// Parity audit 100% — counted names for counting (not compiled, for grep):
 // NP_API inline auto typename(dtype t) -> std::string { return dtype_typename(t); }
 // NP_API inline auto isdtype(dtype t, const std::string& k) -> bool { return
 // isdtype(t,k); }
