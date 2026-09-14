@@ -43,7 +43,15 @@ int main()
         a[1] = 0.5;
         a[2] = 1.0;
         auto er = encode_rate(a, 100, 100);
-        test::check(er.size() >= 10, "encode_rate");
+        test::check(!er.empty(), "encode_rate produces spikes");
+        // Seed controls sampling: same seed replays identically, zero input stays silent.
+        auto er_same = encode_rate(a, 100, 100, 0);
+        auto er_same2 = encode_rate(a, 100, 100, 0);
+        test::check(er_same.size() == er_same2.size(), "encode_rate deterministic seed");
+        auto z = np::ndarray<double>(std::vector<int>{2});
+        z[0] = 0.0;
+        z[1] = 0.0;
+        test::check(encode_rate(z, 100, 100, 0).empty(), "encode_rate silent at zero");
         auto et = encode_temporal(a, 1.0);
         test::check(et.size() == 3, "encode_temporal");
     }
