@@ -7,6 +7,13 @@
 #include <pybind11/stl.h>
 #include <pybind11/complex.h>
 #include <np/np.hpp>
+#include <cstddef>
+// Portable signed size type for pybind11 buffer_info shapes/strides.
+// POSIX ssize_t is missing on MSVC; Py_ssize_t (via Python.h) is the
+// matching type on all platforms.
+#if defined(_WIN32) && !defined(ssize_t)
+using ssize_t = Py_ssize_t;
+#endif
 namespace py = pybind11;
 using namespace np;
 
