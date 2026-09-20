@@ -96,7 +96,9 @@
 #endif
 #endif
 
-namespace np::differential
+namespace np::inline v1
+{
+namespace differential
 {
 
 // ── typedefs for std::types (do not use std:: explicitly) ───────────────
@@ -2580,6 +2582,7 @@ inline NodePtr DiffVisitor::visit(const Node &n) const
     return make_const(0);
 }
 
-} // namespace np::differential
+} // namespace differential
+} // namespace np::inline v1
 
 #endif // NP_DIFFERENTIAL_HPP

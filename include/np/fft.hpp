@@ -24,7 +24,9 @@
 #include "fft/fft_shift.hpp"
 #include "pqc.hpp"
 
-namespace np::fft::secure
+namespace np::inline v1
+{
+namespace fft::secure
 {
 template <typename... Args> NP_NODISCARD inline auto fft(Args &&...args)
 {
@@ -50,6 +52,7 @@ template <typename... Args> NP_NODISCARD inline auto fftn(Args &&...args)
     pqc::ct_barrier();
     return r;
 }
-} // namespace np::fft::secure
+} // namespace fft::secure
+} // namespace np::inline v1
 
 #endif // NP_FFT_HPP

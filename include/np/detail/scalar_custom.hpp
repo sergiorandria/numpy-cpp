@@ -28,7 +28,9 @@
 #include "../dtype.hpp"
 #include "scalar_builtin.hpp"
 
-namespace np::detail::fixed
+namespace np::inline v1
+{
+namespace detail::fixed
 {
 
 // scalar_traits for the dtype_storage storage classifiers
@@ -179,6 +181,7 @@ template <typename Op, typename A> struct unary_apply<Op, A, true>
     }
 };
 
-} // namespace np::detail::fixed
+} // namespace detail::fixed
+} // namespace np::inline v1
 
 #endif // NP_DETAIL_SCALAR_CUSTOM_HPP

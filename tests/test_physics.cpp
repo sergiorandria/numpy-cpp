@@ -5,6 +5,8 @@
 #include "test_util.hpp"
 #include <np/np.hpp>
 
+#include <numbers>
+
 namespace
 {
 
@@ -166,7 +168,7 @@ int main()
     // ── Projectile: vacuum range matches analytics ──
     {
         Projectile p(9.81, 0.0, 0.0);
-        const double v0 = 10.0, ang = M_PI / 4.0;
+        const double v0 = 10.0, ang = std::numbers::pi / 4.0;
         auto traj = p.simulate(v0, ang, 0.0005);
         const double r = Projectile::range(traj);
         test::check(test::approx(r, Projectile::range_vacuum(v0, ang), 1e-3), "projectile vacuum range");
@@ -175,8 +177,8 @@ int main()
     // ── Projectile: drag shortens the flight ──
     {
         Projectile free(9.81, 0.0), drag(9.81, 0.05);
-        const double rf = Projectile::range(free.simulate(20.0, M_PI / 4.0, 0.001));
-        const double rd = Projectile::range(drag.simulate(20.0, M_PI / 4.0, 0.001));
+        const double rf = Projectile::range(free.simulate(20.0, std::numbers::pi / 4.0, 0.001));
+        const double rd = Projectile::range(drag.simulate(20.0, std::numbers::pi / 4.0, 0.001));
         test::check(rd < rf && rd > 0.0, "projectile drag shortens");
     }
     // ── Wave1D: symmetric pluck stays symmetric and bounded ──
@@ -256,7 +258,7 @@ int main()
         nb.add_body(1.0, {-0.5, 0.0, 0.0}, {0.0, -v, 0.0});
         nb.add_body(1.0, {0.5, 0.0, 0.0}, {0.0, v, 0.0});
         const double e0 = nb.total_energy();
-        const double T = 2.0 * M_PI / om;
+        const double T = 2.0 * std::numbers::pi / om;
         const int n = static_cast<int>(T / 0.001);
         for (int s = 0; s < n; ++s)
         {
@@ -308,7 +310,7 @@ int main()
         {
             const double q = 1.602176634e-19, m = 9.1093837015e-31, B0 = 1.0;
             ChargedParticle pt(q, m, {0.0, 0.0, 0.0}, {1.0e6, 0.0, 0.0});
-            const double T = 2.0 * M_PI * m / (q * B0);
+            const double T = 2.0 * std::numbers::pi * m / (q * B0);
             const int n = 2000;
             const double dt = T / n;
             const double e0 = pt.kinetic_energy();
@@ -325,9 +327,10 @@ int main()
         {
             auto t2 = snell(1.0, 1.5, 0.0);
             test::check(t2.has_value() && test::approx(*t2, 0.0, 1e-12), "snell normal");
-            test::check(!snell(1.5, 1.0, M_PI / 3.0).has_value(), "snell TIR empty");
+            test::check(!snell(1.5, 1.0, std::numbers::pi / 3.0).has_value(), "snell TIR empty");
             test::check(test::approx(fresnel_reflectance(1.0, 1.5, 0.0), 0.04, 1e-9), "fresnel normal 4%");
-            test::check(test::approx(fresnel_reflectance(1.5, 1.0, M_PI / 3.0), 1.0, 1e-12), "fresnel TIR total");
+            test::check(test::approx(fresnel_reflectance(1.5, 1.0, std::numbers::pi / 3.0), 1.0, 1e-12),
+                        "fresnel TIR total");
             auto di = thin_lens_image(0.1, 0.3);
             test::check(di.has_value() && test::approx(*di, 0.15, 1e-9), "thin lens");
             test::check(!thin_lens_image(0.1, 0.1).has_value(), "thin lens infinity");
@@ -364,7 +367,7 @@ int main()
         test::check(test::approx(ho_energy(0, 1.0), 0.5 * np::physics::constants::hbar, 1e-12), "ho zero point");
         test::check(test::approx(hydrogen_energy(1) / np::physics::constants::eV, -13.605693, 1e-5), "hydrogen E1");
         test::check(test::approx(hydrogen_energy(2) / hydrogen_energy(1), 0.25, 1e-12), "hydrogen 1/n^2");
-        test::check(test::approx(rabi_probability(1.0, M_PI, 0.0), 1.0, 1e-9), "rabi full flip");
+        test::check(test::approx(rabi_probability(1.0, std::numbers::pi, 0.0), 1.0, 1e-9), "rabi full flip");
         test::check(test::approx(rabi_probability(1.0, 0.0, 0.0), 0.0, 1e-12), "rabi t=0");
         const double Tr = tunnel_rectangular(5.0 * np::physics::constants::eV, 10.0 * np::physics::constants::eV, 1e-10,
                                              np::physics::constants::m_e);
@@ -404,7 +407,7 @@ int main()
         using namespace np::physics;
         test::check(test::approx(reynolds(1000.0, 1.0, 0.1, 1e-3), 1e5, 1e-12), "reynolds water pipe");
         test::check(test::approx(mach_number(340.0, 340.0), 1.0, 1e-12), "mach 1");
-        test::check(test::approx(stokes_drag(1e-3, 1e-6, 1e-3), 6.0 * M_PI * 1e-12, 1e-9), "stokes drag");
+        test::check(test::approx(stokes_drag(1e-3, 1e-6, 1e-3), 6.0 * std::numbers::pi * 1e-12, 1e-9), "stokes drag");
         test::check(nusselt_laminar_flat(1e4, 0.7) > 0.0, "nusselt positive");
         test::check(test::approx(prandtl(1.81e-5, 1006.0, 0.026), 0.70, 1e-2), "prandtl air");
         test::check(test::approx(froude(2.0, 10.0), 2.0 / std::sqrt(98.1), 1e-12), "froude");

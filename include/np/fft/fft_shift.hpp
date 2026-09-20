@@ -26,7 +26,9 @@
 #include "../manipulation.hpp"
 #include "../ndarray.hpp"
 
-namespace np::fft
+namespace np::inline v1
+{
+namespace fft
 {
 
 /**
@@ -144,6 +146,7 @@ NP_NODISCARD auto ifftshift(const ndarray<T> &x, std::optional<std::vector<int>>
     return detail::shift_roll(x, axes, -1);
 }
 
-} // namespace np::fft
+} // namespace fft
+} // namespace np::inline v1
 
 #endif // NP_FFT_SHIFT_HPP

@@ -33,7 +33,9 @@
 #define NP_ACCEL_GPU_SIZE_THRESH 1000000
 #define NP_ACCEL_BENCH_DIM 128
 
-namespace np::accelerator
+namespace np::inline v1
+{
+namespace accelerator
 {
 
 struct IAccelerator
@@ -246,6 +248,7 @@ struct AcceleratorFactory
     }
 };
 
-} // namespace np::accelerator
+} // namespace accelerator
+} // namespace np::inline v1
 
 #endif // NP_ACCELERATOR_HPP

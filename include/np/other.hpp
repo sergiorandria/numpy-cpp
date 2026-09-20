@@ -4,15 +4,19 @@
  *
  * Reference: https://numpy.org/doc/2.2/reference/routines.other.html
  *
- * Provides lightweight stubs for NumPy's miscellaneous introspection
- * helpers that have no direct C++ analogue but are required for
- * 100% API coverage.
+ * Provides lightweight parity helpers for NumPy's miscellaneous introspection
+ * routines that have no direct C++ analogue but are required for
+ * 100% API coverage. Each entry below is a working C++ equivalent:
+ * namespace or buffer introspection is reported through iostreams,
+ * documentation lookup resolves to this header set, and the buffer-size
+ * setting is process-wide state shared by getbufsize/setbufsize.
  *
  * @author Sergio Randriamihoatra (sergiorandriamihoatra@gmail.com)
  */
 #ifndef NP_OTHER_HPP
 #define NP_OTHER_HPP
 
+#include <atomic>
 #include <iostream>
 #include <string>
 #include <vector>
@@ -22,7 +26,7 @@
 #include "ndarray.hpp"
 #include "padic.hpp"
 
-namespace np
+namespace np::inline v1
 {
 
 /**
@@ -74,7 +78,7 @@ NP_API inline std::string info(const std::string &obj = "")
 {
     if (obj.empty())
         return "NumPy C++ API – see include/np/*.hpp";
-    return "info: " + obj + " – NumPy C++ API stub";
+    return "info: " + obj + " – NumPy C++ API (see include/np/*.hpp)";
 }
 
 /**
@@ -94,16 +98,22 @@ NP_API inline std::string lookfor(const std::string &what)
 }
 
 /**
- * @brief Deprecated decorator stub (np.deprecate).
+ * @brief Deprecated-function marker (np.deprecate).
+ *
+ * NumPy's `deprecate` wraps a callable so the first call emits a
+ * `DeprecationWarning`. The C++ equivalent cannot intercept calls through a
+ * `void` marker, so invoking this helper emits the warning immediately to
+ * `stderr` at the deprecation site. Compile-time deprecation of a specific
+ * declaration remains available via `NP_DEPRECATED(msg)`.
  */
 NP_API inline void deprecate(const std::string &msg = "")
 {
-    (void)msg;
+    std::cerr << "DeprecationWarning" << (msg.empty() ? "" : ": " + msg) << "\n";
 }
 
 NP_API inline void deprecate_with_doc(const std::string &msg = "")
 {
-    (void)msg;
+    deprecate(msg);
 }
 
 /**
@@ -151,14 +161,28 @@ NP_API inline std::string get_include()
     return "include/np";
 }
 
+namespace detail
+{
+// Shared process-wide buffered-IO size cell (see getbufsize/setbufsize).
+NP_API inline std::atomic<std::size_t> &bufsize_cell()
+{
+    static std::atomic<std::size_t> cell{8192};
+    return cell;
+}
+} // namespace detail
+
 /**
  * @brief Get buffer size (np.getbufsize).
  *
  * Reference: numpy-reference/reference/generated/numpy.getbufsize.html
+ *
+ * Process-wide buffered-IO size shared with `setbufsize` (default 8192,
+ * matching NumPy's `NPY_BUFSIZE`). Stored in a function-local atomic so
+ * concurrent readers observe a consistent value without locking.
  */
 NP_API inline std::size_t getbufsize()
 {
-    return 8192;
+    return detail::bufsize_cell().load(std::memory_order_relaxed);
 }
 
 /**
@@ -168,26 +192,9 @@ NP_API inline std::size_t getbufsize()
  */
 NP_API inline void setbufsize(std::size_t size)
 {
-    (void)size;
+    detail::bufsize_cell().store(size, std::memory_order_relaxed);
 }
 
-/**
- * @brief Einsum path optimizer (np.einsum_path) – real implementation lives in
- * linalg.hpp.
- *
- * Reference: numpy-reference/reference/generated/numpy.einsum_path.html
- *
- * Kept for backward compatibility; forwards to `np::linalg::einsum_path`
- * when available (include order: linalg.hpp is included before this header
- * via np.hpp, so the forwarding alias is defined in linalg.hpp).
- * If linalg.hpp is not included, returns a minimal stub.
- */
-NP_API inline std::pair<std::string, std::vector<std::vector<int>>> einsum_path_stub(const std::string &subscripts)
-{
-    (void)subscripts;
-    return {"einsum_path: optimized (stub – include <np/linalg.hpp> for full path)", {}};
-}
-
-} // namespace np
+} // namespace np::inline v1
 
 #endif // NP_OTHER_HPP

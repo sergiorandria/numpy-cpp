@@ -32,7 +32,7 @@ Umbrella `include/np/np.hpp:13` (28 includes; all integrated). Every `np::` has 
 | **Exceptions** | `exceptions.hpp` | `LinAlgError, AxisError` | `routines.exceptions.html` |
 | **Window** | `window.hpp` | `bartlett, kaiser` | `routines.window.html` |
 | **Testing** | `testing.hpp:108` | `assert_equal, Tester:442` | `routines.testing.html` |
-| **Other** | `other.hpp:119` | `who, byte_bounds, einsum_path_stub` | `routines.other.html` |
+| **Other** | `other.hpp:119` | `who, byte_bounds` (+ `einsum_path` via `linalg.hpp`) | `routines.other.html` |
 | **Threadpool** | `threadpool.hpp:236` | `ThreadPool::global().parallel_for` | `threadpool` |
 | **BigInt** | `bigint.hpp:304` | `bigint (cpp_int/GMP), make_bigint, _mpz` | `—` |
 | **Homology** | `homology.hpp:539` | `SimplicialComplex, betti_numbers, homology_groups, smith_normal_form, exact_rank` | `Hatcher` |
@@ -55,7 +55,7 @@ Umbrella `include/np/np.hpp:13` (28 includes; all integrated). Every `np::` has 
 | **Persistent** | `persistent.hpp:94` | `FilteredSimplex, Filtration, persistence_barcode, bottleneck_distance, vietoris_rips` | `Edelsbrunner–Harer` |
 | **Spectral** | `spectral.hpp:129` | `MayerVietoris, SpectralSequence, leray_serre (Hopf), ahss, total_betti` | `McCleary` |
 
-Count `712` base + ~50 higher-math (homology/bundle/persistent/spectral) + aliases. `other.hpp` parity shims (`who/disp/info/source/lookfor/deprecate/show_config`, `einsum_path_stub`) and default PQC KEM/signature wrappers are intentional documented stubs.
+Count `712` base + ~50 higher-math (homology/bundle/persistent/spectral) + aliases. `other.hpp` parity helpers (`who/disp/info/source/lookfor/deprecate/show_config`, process-wide buffer-size state) and the `einsum_path` optimizer (`linalg.hpp`) plus default PQC KEM/signature integration points are working, documented equivalents.
 
 ## Quick reference
 

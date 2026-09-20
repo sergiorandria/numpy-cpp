@@ -38,7 +38,7 @@
 #include "api_macros.hpp"
 #include "ndarray.hpp"
 
-namespace np
+namespace np::inline v1
 {
 namespace datetime
 {
@@ -1027,6 +1027,6 @@ using datetime::isnat;
 using datetime::NaT;
 using datetime::normalize_holidays;
 using datetime::parse_weekmask;
-} // namespace np
+} // namespace np::inline v1
 
 #endif // NP_DATETIME_HPP

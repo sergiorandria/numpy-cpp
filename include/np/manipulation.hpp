@@ -32,7 +32,7 @@
 #include "dtype.hpp"
 #include "ndarray.hpp"
 
-namespace np
+namespace np::inline v1
 {
 // Rearranging Elements
 /**
@@ -1478,8 +1478,11 @@ inline auto where(const ndarray<bool> &condition) -> std::vector<ndarray<std::si
 NP_API template <typename T>
 NP_NODISCARD auto broadcast_to(const ndarray<T> &arr, const std::vector<int> &shape) -> ndarray<T>
 {
-    // Validate broadcast compatibility via detail::broadcast_shapes
-    (void)detail::broadcast_shapes(arr.shape, shape);
+    // Validate broadcast compatibility; broadcast_shapes throws on mismatch
+    // and returns the resolved shape, which must equal the requested target.
+    const std::vector<int> resolved = detail::broadcast_shapes(arr.shape, shape);
+    if (resolved != shape)
+        throw std::invalid_argument("broadcast_to: shape not broadcast-compatible");
     ndarray<T> out(shape);
     detail::Odometer od(shape);
     while (!od.done())
@@ -2544,6 +2547,6 @@ NP_API inline auto broadcast_shapes(const std::vector<int> &a, const std::vector
     return detail::broadcast_shapes(detail::broadcast_shapes(a, b), c);
 }
 
-} // namespace np
+} // namespace np::inline v1
 
 #endif // NP_MANIPULATION_HPP

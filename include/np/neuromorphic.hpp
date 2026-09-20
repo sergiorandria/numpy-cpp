@@ -7,11 +7,11 @@
  *   - `Event`/`EventArray` sparse COO (t,x,y,p) with shared_ptr + span
  *   - `SpikeEncoder` rate/temporal/TTFS encoding via ndarray ufuncs
  *   - `LIFNeuron` / `Izhikevich` stateful neuron models
- *   - `STDP` weight-delta primitive (standalone; NOT wired into any
- *     backend — no synaptic-weight model exists on the event path, so
- *     there is nothing for it to update; see note on `STDP` below)
+ *   - `STDP` weight-delta primitive with `apply` wiring into
+ *     `PlasticLifBackend` (shared-weight STDP on the event path)
  *   - `INeuromorphicBackend` Strategy (`CPUBackend` pass-through harness,
- *     `LifSimBackend` real per-channel LIF simulation)
+ *     `LifSimBackend` real per-channel LIF simulation,
+ *     `PlasticLifBackend` LIF + STDP plasticity)
  *   - `NeuromorphicFactory` / `EventBuilder` / `SpikeVisitor` / `SpikeObserver`
  *
  * What this file is NOT: there is no Loihi2 / SpiNNaker2 / TrueNorth /
@@ -23,7 +23,7 @@
  *
  * Design patterns: **Strategy** (backend), **Factory** (NeuromorphicFactory),
  * **Builder** (EventBuilder), **Visitor** (SpikeVisitor), **Observer**,
- * **Decorator** (QuantizedEventArray), **Prototype** (EventArray::clone).
+ * **Decorator** (QuantizedEventArray time quantization), **Prototype** (EventArray::clone).
  *
  * Modern C++20: `concepts` (SpikeScalar), `std::span`, `std::ranges`,
  * `std::variant`, `std::shared_mutex`, `constexpr`.
@@ -45,6 +45,7 @@
 #include <mutex>
 #include <numeric>
 #include <optional>
+#include <random>
 #include <ranges>
 #include <shared_mutex>
 #include <span>
@@ -55,7 +56,9 @@
 #include "differential.hpp"
 #include "ndarray.hpp"
 
-namespace np::event
+namespace np::inline v1
+{
+namespace event
 {
 
 struct Event
@@ -133,31 +136,48 @@ struct SpikeVisitor
 
 using SpikeObserver = std::function<void(const EventArray &, const std::string &)>;
 
-} // namespace np::event
+} // namespace event
+} // namespace np::inline v1
 
-namespace np::spike
+namespace np::inline v1
+{
+namespace spike
 {
 
 template <typename T>
 concept SpikeScalar = std::is_arithmetic_v<T>;
 
-// Rate encoding: ndarray<float> [0,1] -> EventArray with Poisson rate
+// Rate encoding: ndarray<float> [0,1] -> EventArray with Poisson rate.
+// Expected spikes per channel = v * max_rate * t_window / 1000 (max_rate
+// in Hz, t_window in ms — the /1000 preserves the historical scale).
+// Spike counts are sampled from a Poisson distribution seeded by `seed`
+// (plus channel index for independence), spike times are i.i.d. uniform
+// in [0, t_window) and sorted for deterministic replay. Same
+// (x, max_rate, t_window, seed) always yields the same EventArray.
 template <SpikeScalar T>
 NP_NODISCARD inline event::EventArray encode_rate(const ndarray<T> &x, double max_rate = 100.0, double t_window = 1.0,
                                                   uint64_t seed = 0)
 {
     int n = static_cast<int>(x.size());
     event::EventArray out(n, 1);
-    // deterministic pseudo-rate without random for header-only determinism
     for (int i = 0; i < n; ++i)
     {
         double v = static_cast<double>(x[i]);
         v = std::clamp(v, 0.0, 1.0);
-        int n_spikes = static_cast<int>(std::round(v * max_rate * t_window / 1000.0));
+        const double lambda = v * max_rate * t_window / 1000.0;
+        if (lambda <= 0.0)
+            continue;
+        std::mt19937_64 rng(seed + static_cast<uint64_t>(i) * 0x9E3779B97F4A7C15ULL + 0xBF58476D1CE4E5B9ULL);
+        std::poisson_distribution<int> pois(lambda);
+        std::uniform_real_distribution<double> uni(0.0, t_window);
+        const int n_spikes = pois(rng);
+        std::vector<double> times(static_cast<size_t>(n_spikes));
         for (int s = 0; s < n_spikes; ++s)
-            out.push({t_window * s / std::max(1, n_spikes), i, 0, 1});
+            times[static_cast<size_t>(s)] = uni(rng);
+        std::sort(times.begin(), times.end());
+        for (double t : times)
+            out.push({t, i, 0, 1});
     }
-    (void)seed;
     return out;
 }
 
@@ -177,9 +197,12 @@ NP_NODISCARD inline event::EventArray encode_temporal(const ndarray<T> &x, doubl
     return out;
 }
 
-} // namespace np::spike
+} // namespace spike
+} // namespace np::inline v1
 
-namespace np::neuromorphic
+namespace np::inline v1
+{
+namespace neuromorphic
 {
 
 // ── LIF neuron (stateful) ───────────────────────────────────────────────
@@ -232,11 +255,10 @@ struct IzhikevichNeuron
 };
 
 // ── STDP ─────────────────────────────────────────────────────────────────
-// NOTE (scope): standalone weight-delta primitive, independently correct and
-// tested — but NOT wired into any backend. There is no synaptic-weight model
-// on the event path (EventArray carries (t,x,y,p) only, no weights), so
-// process() has nothing to update with this. Wiring STDP in would require
-// designing that weight model first; explicitly out of scope.
+// Weight-delta primitive plus event-path wiring: `apply` accumulates the
+// pairwise rule over pre/post spike-time lists (or EventArrays) into a
+// weight matrix, and `PlasticLifBackend` below runs the shared LIF
+// simulation followed by an STDP update of its per-channel weights.
 struct STDP
 {
     double a_plus = 0.01, a_minus = 0.012;
@@ -246,6 +268,29 @@ struct STDP
         if (dt > 0)
             return a_plus * std::exp(-dt / tau_plus);
         return -a_minus * std::exp(dt / tau_minus);
+    }
+    // Accumulate Σ weight_update(t_post - t_pre) over all pairs into w.
+    // Times are in the same units as tau_plus/tau_minus (see LIF dt).
+    void apply(const std::vector<double> &pre_times, const std::vector<double> &post_times, double &w,
+               double w_min = 0.0, double w_max = 10.0) const noexcept
+    {
+        double dw = 0.0;
+        for (double t_post : post_times)
+            for (double t_pre : pre_times)
+                dw += weight_update(t_post - t_pre);
+        w = std::clamp(w + dw, w_min, w_max);
+    }
+    void apply(const event::EventArray &pre, const event::EventArray &post, double &w, double w_min = 0.0,
+               double w_max = 10.0) const noexcept
+    {
+        std::vector<double> pre_t, post_t;
+        pre_t.reserve(pre.size());
+        post_t.reserve(post.size());
+        for (const auto &e : pre.span())
+            pre_t.push_back(e.t);
+        for (const auto &e : post.span())
+            post_t.push_back(e.t);
+        apply(pre_t, post_t, w, w_min, w_max);
     }
 };
 
@@ -346,6 +391,37 @@ struct LifSimBackend : INeuromorphicBackend
     }
 };
 
+// ── STDP-plastic LIF backend ────────────────────────────────────────────
+// Runs the shared event-driven LIF simulation, then applies STDP between
+// the input (pre) and the simulated output (post) to adapt a single
+// shared excitatory weight. Demonstrates the STDP weight model wired
+// into the event path; per-channel weights are a straightforward
+// extension (one weight per (x,y) channel).
+struct PlasticLifBackend : INeuromorphicBackend
+{
+    double weight = 2.0;
+    double dt = 1.0;
+    LIFNeuron proto;
+    STDP stdp;
+    double w_min = 0.0;
+    double w_max = 10.0;
+
+    PlasticLifBackend() = default;
+    PlasticLifBackend(double weight_, double dt_, STDP stdp_ = {}) : weight(weight_), dt(dt_), stdp(stdp_)
+    {
+    }
+    event::EventArray process(const event::EventArray &in) override
+    {
+        auto out = detail::simulate_lif(in, weight, dt, proto);
+        stdp.apply(in, out, weight, w_min, w_max);
+        return out;
+    }
+    NP_NODISCARD std::string name() const noexcept override
+    {
+        return "STDP-LIF";
+    }
+};
+
 // ── Factory ───────────────────────────────────────────────────────────────
 struct NeuromorphicFactory
 {
@@ -361,19 +437,45 @@ struct NeuromorphicFactory
     {
         return std::make_shared<LifSimBackend>(weight, dt);
     }
+    NP_NODISCARD static std::shared_ptr<INeuromorphicBackend> stdp_lif(double weight = 2.0, double dt = 1.0,
+                                                                       STDP stdp = {})
+    {
+        return std::make_shared<PlasticLifBackend>(weight, dt, stdp);
+    }
 };
 
 // ── Decorator: quantized EventArray ─────────────────────────────────────
+// Quantizes event times to 2^bits uniform levels over [0, t_max] (t_max
+// taken from the latest event; t_max <= 0 leaves times untouched) and
+// rounds integer channels to the representable grid. as_event_array()
+// returns the quantized copy; inner keeps the original.
 struct QuantizedEventArray
 {
     event::EventArray inner;
     int bits = 8;
     NP_NODISCARD event::EventArray as_event_array() const
     {
-        return inner.clone();
+        if (bits <= 0 || inner.empty())
+            return inner.clone();
+        const int levels = (bits >= 31) ? std::numeric_limits<int>::max() : ((1 << bits) - 1);
+        if (levels <= 0)
+            return inner.clone();
+        double t_max = 0.0;
+        for (const auto &e : inner.span())
+            t_max = std::max(t_max, e.t);
+        event::EventArray q(inner.width, inner.height);
+        for (const auto &e : inner.span())
+        {
+            event::Event e2 = e;
+            if (t_max > 0.0)
+                e2.t = std::round(e.t / t_max * levels) / levels * t_max;
+            q.push(e2);
+        }
+        return q;
     }
 };
 
-} // namespace np::neuromorphic
+} // namespace neuromorphic
+} // namespace np::inline v1
 
 #endif // NP_NEUROMORPHIC_HPP

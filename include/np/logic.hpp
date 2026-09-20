@@ -31,7 +31,7 @@
 #include "ndarray.hpp"
 #include "pqc.hpp"
 
-namespace np
+namespace np::inline v1
 {
 
 // Type checks
@@ -1150,6 +1150,6 @@ NP_API template <typename T, typename U> bool array_equiv(const ndarray<T> &a1, 
     }
 }
 
-} // namespace np
+} // namespace np::inline v1
 
 #endif // NP_LOGIC_HPP

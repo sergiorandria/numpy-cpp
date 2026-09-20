@@ -26,7 +26,9 @@
 #include "../ndarray.hpp"
 #include "fft_core.hpp"
 
-namespace np::fft
+namespace np::inline v1
+{
+namespace fft
 {
 
 /** @brief Element types accepted by the transform templates. */
@@ -216,6 +218,7 @@ NP_NODISCARD auto ihfft(const ndarray<T> &x, std::optional<std::size_t> n = std:
     return out;
 }
 
-} // namespace np::fft
+} // namespace fft
+} // namespace np::inline v1
 
 #endif // NP_FFT_1D_HPP

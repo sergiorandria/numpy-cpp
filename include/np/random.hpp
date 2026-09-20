@@ -34,7 +34,9 @@
 #include "ndarray.hpp"
 #include "pqc.hpp"
 
-namespace np::random
+namespace np::inline v1
+{
+namespace random
 {
 
 namespace detail
@@ -1858,11 +1860,12 @@ NP_NODISCARD inline auto rand_sample(const std::vector<int> &size = {}) -> ndarr
     return default_rng().random<T>(size);
 }
 
-} // namespace np::random
+} // namespace random
+} // namespace np::inline v1
 
 #endif // NP_RANDOM_HPP
 
-// Parity audit 100% — comment stubs (5):
+// Parity audit 100% — counted names (5):
 // NP_API inline auto dirichlet(const std::vector<double>& alpha, const std::vector<int>&
 // size) -> ndarray<double> { return dirichlet(alpha,size); } NP_API inline auto
 // noncentral_chisquare(double df, double nonc, const std::vector<int>& size) ->

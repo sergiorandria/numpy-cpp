@@ -1,6 +1,6 @@
 # Docs — dev branch
 
-This folder is the **rewritten documentation for `dev`** (header-only, 760+ routines, 49/49 tests). `main`’s README is the stable user guide; here we document internals, micro-opts, and benchmarks introduced in `f7b2653..cf8f4a4`.
+This folder is the **rewritten documentation for `dev`** (header-only, 760+ routines, 52/52 tests). `main`’s README is the stable user guide; here we document internals, micro-opts, and benchmarks introduced in `f7b2653..cf8f4a4`.
 
 ## Index
 
@@ -32,7 +32,7 @@ Start with `../README.md` (dev quick start) → `ARCHITECTURE.md` → `PERFORMAN
 | `SIMD` | SSE2/AVX/NEON | + WASM `v128` + RVV `__riscv_vsetvl` |
 | `Threadpool` | mutex `dq_` | Chase-Lev ring `top/bottom` CAS |
 
-All 49 tests still pass — micro-opts are `[[likely]]` guarded with fallback.
+All 52 tests still pass — micro-opts are `[[likely]]` guarded with fallback.
 
 ## How to read
 

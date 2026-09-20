@@ -22,7 +22,9 @@
 #include <llvm/ExecutionEngine/Orc/ThreadSafeModule.h>
 #endif
 
-namespace np::differential::detail_llvm
+namespace np::inline v1
+{
+namespace differential::detail_llvm
 {
 
 std::once_flag LLVMJit::init_flag;
@@ -33,6 +35,7 @@ std::once_flag LLVMJit::init_flag;
 // when included with NP_ENABLE_LLVM. This file exists to break the cycle
 // and to provide a single translation unit for LLVM link.
 
-} // namespace np::differential::detail_llvm
+} // namespace differential::detail_llvm
+} // namespace np::inline v1
 
 #endif // NP_HAS_LLVM_JIT

@@ -17,7 +17,9 @@
 
 #include "api_macros.hpp"
 
-namespace np::exceptions
+namespace np::inline v1
+{
+namespace exceptions
 {
 
 namespace detail
@@ -206,9 +208,10 @@ class VisibleDeprecationWarning : public NumpyError
     }
 };
 
-} // namespace np::exceptions
+} // namespace exceptions
+} // namespace np::inline v1
 
-namespace np
+namespace np::inline v1
 {
 using AxisError = exceptions::AxisError;
 using RankWarning = exceptions::RankWarning;
@@ -220,12 +223,15 @@ using ComplexWarning = exceptions::ComplexWarning;
 using LinAlgError = exceptions::LinAlgError;
 using FloatingPointError = exceptions::FloatingPointError;
 using TooHardError = exceptions::TooHardError;
-} // namespace np
+} // namespace np::inline v1
 
-namespace np::exceptions
+namespace np::inline v1
+{
+namespace exceptions
 {
 // Backward compat: numpy 1.x exposed VisibleDeprecation as VisibleDeprecationWarning
 using VisibleDeprecationWarningAlias = VisibleDeprecationWarning;
-} // namespace np::exceptions
+} // namespace exceptions
+} // namespace np::inline v1
 
 #endif // NP_EXCEPTIONS_HPP

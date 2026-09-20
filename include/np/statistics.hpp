@@ -46,7 +46,7 @@
 #include "threadpool.hpp"
 #endif
 
-namespace np
+namespace np::inline v1
 {
 
 namespace detail
@@ -188,6 +188,40 @@ NP_NODISCARD inline double lin_interp(const std::vector<double> &values, double 
     const std::size_t lo = static_cast<std::size_t>(position);
     const double frac = position - static_cast<double>(lo);
     return values[lo] + frac * (values[lo + 1] - values[lo]);
+}
+
+/** @brief Interpolate sorted `values` at percentile `p` with NumPy `method`. */
+NP_NODISCARD inline double percentile_of_sorted(const std::vector<double> &values, double p,
+                                                const std::string &method)
+{
+    const std::size_t n = values.size();
+    if (n == 0)
+        throw std::invalid_argument("percentile: empty array");
+    if (n == 1)
+        return values[0];
+    const double rank = (static_cast<double>(n) - 1.0) * (p / 100.0);
+    if (method == "linear")
+        return lin_interp(values, rank);
+    const auto lo = static_cast<std::size_t>(std::floor(rank));
+    const auto hi = static_cast<std::size_t>(std::ceil(rank));
+    if (method == "lower" || method == "inverted_cdf" || method == "closest_observation")
+        return values[lo];
+    if (method == "higher")
+        return values[hi];
+    if (method == "nearest")
+        return values[static_cast<std::size_t>(std::llround(rank))];
+    if (method == "midpoint")
+        return 0.5 * (values[lo] + values[hi]);
+    throw std::invalid_argument("percentile: unknown method '" + method +
+                                "' (expected linear/lower/higher/nearest/midpoint)");
+}
+
+/** @brief Validate a percentile `method` name (throws on unknown). */
+inline void check_percentile_method(const std::string &method)
+{
+    if (method != "linear" && method != "lower" && method != "higher" && method != "nearest" &&
+        method != "midpoint" && method != "inverted_cdf" && method != "closest_observation")
+        throw std::invalid_argument("percentile: unknown method '" + method + "'");
 }
 
 /** @brief Promote a (possibly bool/integer) element type for reductions. */
@@ -1738,7 +1772,6 @@ NP_NODISCARD auto histogram(const ndarray<T> &arr, const ndarray<double> &edges)
             ++counts[nbins - 1];
             continue;
         }
-        const double w = hi - lo;
         for (std::size_t b = 0; b < nbins; ++b)
         {
             if (v >= edges.data()[b] && v < edges.data()[b + 1])
@@ -1747,7 +1780,6 @@ NP_NODISCARD auto histogram(const ndarray<T> &arr, const ndarray<double> &edges)
                 break;
             }
         }
-        (void)w;
     }
     Histogram h;
     h.edges = edges.copy();
@@ -2160,51 +2192,129 @@ NP_NODISCARD auto std(const ndarray<T> &a, int axis, int ddof, bool keepdims) ->
     return v;
 }
 
-// ── Additional parity aliases (method param ignored, for 100% coverage)
+// ── Method-dispatched parity overloads (NumPy `method=` selects interpolation)
 NP_API template <typename T, typename Q>
 NP_NODISCARD inline auto quantile(const ndarray<T> &arr, const Q &q, const std::string &method) -> double
 {
-    (void)method;
-    return quantile(arr, q);
+    const double p = static_cast<double>(q);
+    if (p < 0.0 || p > 1.0)
+        throw std::invalid_argument("quantile: q must be in [0, 1]");
+    if (arr.size() == 0)
+        throw std::invalid_argument("quantile: empty array");
+    detail::check_percentile_method(method);
+    std::vector<double> values;
+    values.reserve(arr.size());
+    for (auto it = arr.begin(); it != arr.end(); ++it)
+        values.push_back(static_cast<double>(*it));
+    std::sort(values.begin(), values.end());
+    return detail::percentile_of_sorted(values, p * 100.0, method);
 }
 
 NP_API template <typename T, typename Q>
 NP_NODISCARD inline auto quantile(const ndarray<T> &arr, const Q &q, int axis, const std::string &method)
     -> ndarray<double>
 {
-    (void)method;
-    return quantile(arr, q, axis);
+    const double p = static_cast<double>(q);
+    if (p < 0.0 || p > 1.0)
+        throw std::invalid_argument("quantile: q must be in [0, 1]");
+    detail::check_percentile_method(method);
+    return detail::stat_axis_map<double>(arr, axis, [p, method](const std::vector<T> &slice) -> double {
+        if (slice.empty())
+            throw std::invalid_argument("quantile: empty slice along axis");
+        std::vector<double> vals;
+        vals.reserve(slice.size());
+        for (const auto &v : slice)
+            vals.push_back(static_cast<double>(v));
+        std::sort(vals.begin(), vals.end());
+        return detail::percentile_of_sorted(vals, p * 100.0, method);
+    });
 }
 
 NP_API template <typename T, typename Q>
 NP_NODISCARD inline auto nanquantile(const ndarray<T> &arr, const Q &q, const std::string &method) -> double
 {
-    (void)method;
-    return nanquantile(arr, q);
+    const double p = static_cast<double>(q);
+    if (p < 0.0 || p > 1.0)
+        throw std::invalid_argument("nanquantile: q must be in [0, 1]");
+    detail::check_percentile_method(method);
+    std::vector<T> all;
+    all.reserve(arr.size());
+    for (auto it = arr.begin(); it != arr.end(); ++it)
+        all.push_back(*it);
+    std::vector<double> vals;
+    for (const auto &v : all)
+    {
+        if (!detail::is_nan_elem(v))
+            vals.push_back(static_cast<double>(v));
+    }
+    if (vals.empty())
+        return std::numeric_limits<double>::quiet_NaN();
+    std::sort(vals.begin(), vals.end());
+    return detail::percentile_of_sorted(vals, p * 100.0, method);
 }
 
 NP_API template <typename T, typename Q>
 NP_NODISCARD inline auto nanquantile(const ndarray<T> &arr, const Q &q, int axis, const std::string &method)
     -> ndarray<double>
 {
-    (void)method;
-    return nanquantile(arr, q, axis);
+    const double p = static_cast<double>(q);
+    if (p < 0.0 || p > 1.0)
+        throw std::invalid_argument("nanquantile: q must be in [0, 1]");
+    detail::check_percentile_method(method);
+    return detail::stat_axis_map<double>(arr, axis, [p, method](const std::vector<T> &slice) -> double {
+        std::vector<double> vals;
+        for (const auto &v : slice)
+        {
+            if (!detail::is_nan_elem(v))
+                vals.push_back(static_cast<double>(v));
+        }
+        if (vals.empty())
+            return std::numeric_limits<double>::quiet_NaN();
+        std::sort(vals.begin(), vals.end());
+        return detail::percentile_of_sorted(vals, p * 100.0, method);
+    });
 }
 
 NP_API template <typename T, typename Q>
 NP_NODISCARD inline auto percentile(const ndarray<T> &arr, const Q &q, const std::string &method) -> double
 {
-    (void)method;
-    return percentile(arr, q);
+    const double p = static_cast<double>(q);
+    if (p < 0.0 || p > 100.0)
+        throw std::invalid_argument("percentile: q must be in [0, 100]");
+    if (arr.size() == 0)
+        throw std::invalid_argument("percentile: empty array");
+    detail::check_percentile_method(method);
+    std::vector<double> values;
+    values.reserve(arr.size());
+    for (auto it = arr.begin(); it != arr.end(); ++it)
+        values.push_back(static_cast<double>(*it));
+    std::sort(values.begin(), values.end());
+    return detail::percentile_of_sorted(values, p, method);
 }
 
 NP_API template <typename T, typename Q>
 NP_NODISCARD inline auto nanpercentile(const ndarray<T> &arr, const Q &q, const std::string &method) -> double
 {
-    (void)method;
-    return nanpercentile(arr, q);
+    const double p = static_cast<double>(q);
+    if (p < 0.0 || p > 100.0)
+        throw std::invalid_argument("nanpercentile: q must be in [0, 100]");
+    detail::check_percentile_method(method);
+    std::vector<T> all;
+    all.reserve(arr.size());
+    for (auto it = arr.begin(); it != arr.end(); ++it)
+        all.push_back(*it);
+    std::vector<double> vals;
+    for (const auto &v : all)
+    {
+        if (!detail::is_nan_elem(v))
+            vals.push_back(static_cast<double>(v));
+    }
+    if (vals.empty())
+        return std::numeric_limits<double>::quiet_NaN();
+    std::sort(vals.begin(), vals.end());
+    return detail::percentile_of_sorted(vals, p, method);
 }
 
-} // namespace np
+} // namespace np::inline v1
 
 #endif // NP_STATISTICS_HPP

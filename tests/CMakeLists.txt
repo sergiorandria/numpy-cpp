@@ -1,4 +1,5 @@
 set(NP_TESTS
+    test_abi
     test_dtype
     test_proxy
     test_ndarray
@@ -14,6 +15,7 @@ set(NP_TESTS
     test_random
     test_statistics
     test_simd
+    test_vecmath
     test_manipulation
     test_scalar_custom
     test_char
@@ -25,6 +27,7 @@ set(NP_TESTS
     test_abstract
     test_variety
     test_manifold
+    test_bundle
     test_differential
     test_datetime
     test_higher

@@ -21,7 +21,7 @@
  * rational cup products and stays provisional on agreement instead of
  * claiming a conclusive equivalence.
  *
- * Improvements over previous stub:
+ * Improvements over the previous minimal version:
  *   - Graphs (1-dim) are aspherical: π_{≥2}=0 conclusively (universal cover is a tree).
  *   - Whitehead: simply-connected + homology iso ⇒ equivalent; otherwise
  *     non-simply-connected higher dims are inconclusive unless both 1-skeleta.
@@ -42,7 +42,9 @@
 #include "cohomology.hpp"
 #include "homology.hpp"
 
-namespace np::homotopy
+namespace np::inline v1
+{
+namespace homotopy
 {
 
 namespace detail
@@ -344,6 +346,7 @@ NP_NODISCARD inline HomotopyGroup homotopy_group(const std::vector<ndarray<int>>
     return {hg[n].betti, hg[n].torsion, false};
 }
 
-} // namespace np::homotopy
+} // namespace homotopy
+} // namespace np::inline v1
 
 #endif // NP_HOMOTOPY_HPP

@@ -36,7 +36,9 @@
 #include "../threadpool.hpp"
 #endif
 
-namespace np::fft
+namespace np::inline v1
+{
+namespace fft
 {
 
 /** @brief Complex type used by the FFT routines. */
@@ -947,6 +949,7 @@ inline void conjugate_inplace(ndarray<Cplx> &a)
 }
 
 } // namespace detail
-} // namespace np::fft
+} // namespace fft
+} // namespace np::inline v1
 
 #endif // NP_FFT_CORE_HPP

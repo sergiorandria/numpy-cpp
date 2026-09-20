@@ -6,6 +6,8 @@
 #include <iostream>
 #include <np/np.hpp>
 
+#include <numbers>
+
 int main()
 {
     using namespace np::physics;
@@ -22,7 +24,7 @@ int main()
 
     // Projectile: vacuum range vs quadratic drag.
     Projectile free(9.81, 0.0), draggy(9.81, 0.05);
-    const double v0 = 20.0, ang = M_PI / 4.0;
+    const double v0 = 20.0, ang = std::numbers::pi / 4.0;
     std::cout << "range vacuum " << Projectile::range_vacuum(v0, ang) << " simulated "
               << Projectile::range(free.simulate(v0, ang, 0.001)) << " drag "
               << Projectile::range(draggy.simulate(v0, ang, 0.001)) << "\n";
@@ -65,13 +67,13 @@ int main()
     nb.add_body(1.0, {-0.5, 0.0, 0.0}, {0.0, -v, 0.0});
     nb.add_body(1.0, {0.5, 0.0, 0.0}, {0.0, v, 0.0});
     const double e0b = nb.total_energy();
-    const int n = static_cast<int>(2.0 * M_PI / om / 0.001);
+    const int n = static_cast<int>(2.0 * std::numbers::pi / om / 0.001);
     for (int i = 0; i < n; ++i)
     {
         nb.step_verlet(0.001);
     }
-    std::cout << "nbody body0 (" << nb.pos[0][0] << ", " << nb.pos[0][1] << ") energy drift "
-              << nb.total_energy() - e0b << "\n";
+    std::cout << "nbody body0 (" << nb.pos[0][0] << ", " << nb.pos[0][1] << ") energy drift " << nb.total_energy() - e0b
+              << "\n";
 
     // Boussinesq smoke: warm blob below drives flow.
     Boussinesq2D q(20, 20, 100.0);

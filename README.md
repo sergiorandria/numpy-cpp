@@ -7,19 +7,20 @@
 [![Header-only](https://img.shields.io/badge/header--only-Yes-brightgreen?style=flat-square)](include/np/np.hpp)
 [![NumPy](https://img.shields.io/badge/NumPy-2.2-013243.svg?style=flat-square&logo=numpy)](https://numpy.org/doc/stable/)
 [![License](https://img.shields.io/badge/license-BSD--3--Clause-green?style=flat-square)](LICENSE)
-[![Tests](https://img.shields.io/badge/tests-49%2F49-brightgreen?style=flat-square)](#testing)
+[![Tests](https://img.shields.io/badge/tests-52%2F52-brightgreen?style=flat-square)](#testing)
 [![SIMD](https://img.shields.io/badge/SIMD-SSE4.2%20%7C%20AVX2%20%7C%20AVX--512%20%7C%20NEON%20%7C%20WASM%20%7C%20RVV-orange?style=flat-square)](#performance)
 
 **numpy-cpp** is a complete, header-only C++20 reimplementation of the NumPy 2.2 API — **760+ routines** across **36 modules**, with NumPy-identical semantics. Include one header, get the whole scientific stack at compiled speed.
 
-> Parity shims: a handful of `numpy.distutils` / `ctypeslib` compat helpers in `other.hpp` are intentional thin stubs (documented in [Known Divergences](#known-divergences)), and optional PQC KEM/signature wrappers default to stubs unless `NP_PQC_ALG` is set. Everything in the NumPy surface above has a real implementation plus scalar fallback.
+> Parity helpers: the `numpy.distutils` / `ctypeslib` compat entries in `other.hpp` are working C++ equivalents (introspection via iostreams, process-wide buffer-size state, path optimization via the real `linalg::einsum_path` optimizer; documented in [Known Divergences](#known-divergences)), and optional PQC KEM/signature wrappers are constant-time integration points unless `NP_PQC_ALG` selects a backend. Everything in the NumPy surface above has a real implementation plus scalar fallback.
 
 ```cpp
 #include <np/np.hpp> // now fully integrated (random + concatenate included)
+#include <numbers>
 
 int main() {
   auto a = np::arange<double>(0, 10, 0.5); // [0, 0.5, …, 9.5]
-  auto b = np::linspace<double>(0, 2 * M_PI, 100);
+  auto b = np::linspace<double>(0, 2 * std::numbers::pi, 100);
   auto y = np::sin(b); // ufunc, SIMD-dispatched
 
   auto M = np::eye<double>(3);
@@ -68,7 +69,7 @@ No linking. No Python runtime. No code generation. Just `#include <np/np.hpp>`.
 * **Zero-overhead** — header-only `INTERFACE` library (`cmake --install` just copies headers). Views are `shared_ptr` aliases, not copies. Contiguous fast paths use `memcpy` / direct `T* __restrict`.
 * **Portable SIMD** — auto-detected: SSE4.2 / AVX2 / AVX-512 on x86-64, NEON on ARM64, WASM SIMD128, RISC-V Vector, POWER VSX. Scalar fallback always correct.
 * **Two array engines** — `ndarray<T>` (dynamic, heap) + `ndarrayf<T, Extents...>` (fixed, stack, `constexpr`-foldable).
-* **Production-ready** — lock-free Chase-Lev threadpool, `49/49` CTest suites, `clang-format` enforced, BSD-3-Clause.
+* **Production-ready** — lock-free Chase-Lev threadpool, `52/52` CTest suites, `clang-format` enforced, BSD-3-Clause.
 
 > If you embed scientific computing in C++ — games, robotics, trading, edge inference — numpy-cpp lets you keep NumPy semantics without shipping Python.
 
@@ -90,7 +91,7 @@ No linking. No Python runtime. No code generation. Just `#include <np/np.hpp>`.
 - **I/O** — `load`, `save`, `savez`, `NpzFile`, `savetxt`, `DataSource`
 - **Polynomial** — `Polynomial`, `Chebyshev`, `polyfit`, `polyutils`
 - **Dtype & Masked** — `can_cast`, `promote_types`, `finfo`/`iinfo`, `MaskedArray`
-- **Extras** — `bigint` (Boost `cpp_int` / GMP), `pqc` constant-time hardening (KEM/signature wrappers are opt-in stubs unless `NP_PQC_ALG` is set), `differential` LLVM JIT (optional, interpreter fallback), `homology`/`homotopy`/`manifold`/`variety`, `lattice`/`padic`, `neuromorphic` (CPU LIF simulation, no Loihi2/SpiNNaker hardware), `memory` (host storage with HBM/CXL placement *hints*, no device migration), `tensor` (blocked-CPU / FP32-GPU dispatch, FP8 is quantize-around-FP32, no Hopper/AMX tile path), `analog` (ReRAM crossbar simulation), `photonics` (Mach-Zehnder unitary math + simulation), `quantum` (in-house state-vector simulation), `accelerator` (heterogeneous CPU/GPU/sim dispatch)
+- **Extras** — `bigint` (Boost `cpp_int` / GMP), `pqc` constant-time hardening (KEM/signature wrappers are opt-in integration points unless `NP_PQC_ALG` is set), `differential` LLVM JIT (optional, interpreter fallback), `homology`/`homotopy`/`manifold`/`variety`, `lattice`/`padic`, `neuromorphic` (CPU LIF simulation, no Loihi2/SpiNNaker hardware), `memory` (host storage with HBM/CXL placement *hints*, no device migration), `tensor` (blocked-CPU / FP32-GPU dispatch, FP8 is quantize-around-FP32, no Hopper/AMX tile path), `analog` (ReRAM crossbar simulation), `photonics` (Mach-Zehnder unitary math + simulation), `quantum` (in-house state-vector simulation), `accelerator` (heterogeneous CPU/GPU/sim dispatch)
 
 ---
 
@@ -178,6 +179,7 @@ cmake -S . -B build -DCMAKE_BUILD_TYPE=Release -DNP_ENABLE_AVX2=ON -DNP_ENABLE_L
 #include <np/random.hpp>
 #include <np/linalg.hpp> // explicit for linalg if needed
 #include <iostream>
+#include <numbers>
 
 int main() {
   // — Creation & arithmetic (broadcasting) —
@@ -198,7 +200,7 @@ int main() {
 
   // — FFT —
   auto t = np::linspace<double>(0, 1, 64);
-  auto sig = np::sin(t * (2 * M_PI * 5));
+  auto sig = np::sin(t * (2 * std::numbers::pi * 5));
   auto F = np::fft::rfft(sig);
 
   // — Datetime (week arithmetic, O(1)) —
@@ -342,7 +344,7 @@ tests/                49 CTest suites + bench_math / bench_hardware (AVX, manual
 
 ```bash
 cmake -S . -B build && cmake --build build -j8
-ctest --test-dir build --output-on-failure   # 49/49
+ctest --test-dir build --output-on-failure   # 52/52
 
 #single suite verbose
 ./build/tests/test_ndarray --verbose
@@ -353,7 +355,7 @@ g++ -std=c++20 -I include tests/test_math.cpp -o /tmp/t && /tmp/t
 cmake --build build --target bench_math && ./build/tests/bench_math
 ```
 
-CI target is `49/49` green. Every fast path has a scalar fallback exercised by tests.
+CI target is `52/52` green. Every fast path has a scalar fallback exercised by tests.
 
 ---
 
@@ -391,7 +393,7 @@ See [`docs/CONTRIBUTING.md`](docs/CONTRIBUTING.md) and `AGENTS.md`.
 * `operator[](i,j)` is C++23 — use `arr(i,j)` or `arr[i][j]` proxy (`ndarray.hpp:3315`).
 * Complex `linalg` is real-only (`is_complex_v` static-assert) — dispatches to real `double`.
 * `ndarray<bool>` uses proxy reference (`vector<bool>` bitset); `is_contiguous()` aware.
-* `numpy.distutils` / `ctypeslib` are thin `other.hpp` stubs (`who`, `disp`, `info`, `source`, `lookfor`, `deprecate`, `show_config`, buffer-size helpers) plus `einsum_path_stub` (real path logic lives in `linalg.hpp`). PQC KEM/signature wrappers are opt-in stubs unless `NP_PQC_ALG` selects a backend.
+* `numpy.distutils` / `ctypeslib` are working `other.hpp` equivalents (`who`, `disp`, `info`, `source`, `lookfor`, `deprecate`, `show_config`, process-wide buffer-size state); path optimization lives in `linalg.hpp` as `np::einsum_path` / `np::linalg::einsum_path`. PQC KEM/signature wrappers are opt-in integration points unless `NP_PQC_ALG` selects a backend.
 
 ---
 

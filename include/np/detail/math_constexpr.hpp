@@ -17,7 +17,9 @@
 #include <cstddef>
 #include <limits>
 
-namespace np::detail::math
+namespace np::inline v1
+{
+namespace detail::math
 {
 
 constexpr double pi_v = 3.141592653589793238462643383279502884;
@@ -270,6 +272,7 @@ constexpr double nan()
     return std::numeric_limits<double>::quiet_NaN();
 }
 
-} // namespace np::detail::math
+} // namespace detail::math
+} // namespace np::inline v1
 
 #endif // NP_DETAIL_MATH_CONSTEXPR_HPP

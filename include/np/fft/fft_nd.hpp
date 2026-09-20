@@ -30,7 +30,9 @@
 #include "fft_1d.hpp"
 #include "fft_core.hpp"
 
-namespace np::fft
+namespace np::inline v1
+{
+namespace fft
 {
 namespace detail
 {
@@ -354,6 +356,7 @@ NP_NODISCARD auto irfft2(const ndarray<T> &x, std::optional<std::vector<int>> s 
     return irfftn(x, s, axes, norm);
 }
 
-} // namespace np::fft
+} // namespace fft
+} // namespace np::inline v1
 
 #endif // NP_FFT_ND_HPP

@@ -63,7 +63,7 @@
 #define NP_HAS_GMP_H 0
 #endif
 
-namespace np
+namespace np::inline v1
 {
 
 #if NP_HAS_CPP_INT
@@ -679,10 +679,12 @@ template <typename T> NP_NODISCARD inline auto make_bigint_array(std::initialize
     return out;
 }
 
-} // namespace np
+} // namespace np::inline v1
 
 // dtype integration: map bigint -> dtype::bigint
-namespace np::detail
+namespace np::inline v1
+{
+namespace detail
 {
 template <> struct cxx_to_np_type_impl<np::bigint>
 {
@@ -694,7 +696,8 @@ template <> struct cxx_to_np_type_impl<np::mpz_bigint>
     static constexpr np::dtype value = np::dtype::bigint;
 };
 #endif
-} // namespace np::detail
+} // namespace detail
+} // namespace np::inline v1
 
 // std::common_type
 namespace std
@@ -717,7 +720,7 @@ template <typename T> struct common_type<np::bigint, T>
 
 //  ndarray converters (need ndarray definition)
 #include "ndarray.hpp"
-namespace np
+namespace np::inline v1
 {
 /**
  * @brief Convert `ndarray<T>` → `ndarray<bigint>` (exact).
@@ -799,6 +802,6 @@ NP_NODISCARD inline auto bigints(std::initializer_list<bigint> list) -> ndarray<
     return out;
 }
 
-} // namespace np
+} // namespace np::inline v1
 
 #endif // NP_BIGINT_HPP

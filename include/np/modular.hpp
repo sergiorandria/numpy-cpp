@@ -45,7 +45,9 @@
 #include "bigint.hpp"
 #include "ndarray.hpp"
 
-namespace np::modular
+namespace np::inline v1
+{
+namespace modular
 {
 
 namespace detail
@@ -716,6 +718,7 @@ NP_NODISCARD inline ModularForm make_delta(int N)
     return ModularForm(12, 1, ramanujan_tau(N));
 }
 
-} // namespace np::modular
+} // namespace modular
+} // namespace np::inline v1
 
 #endif // NP_MODULAR_HPP

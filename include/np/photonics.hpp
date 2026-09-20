@@ -8,7 +8,7 @@
  * on physical hardware (Lightmatter Envise, Lightelligence, Luminous,
  * or any custom photonic processor via callbacks / serial / PCIe).
  *
- * Real-hardware concerns handled here (vs the 47-line stub it replaces):
+ * Real-hardware concerns handled here (replacing the original 47-line minimal version):
  *  -  Phase shifter model (theta/phi -> 2x2 transfer matrix, Givens
  *     convention) with beamsplitter imbalance & insertion loss.
  *  -  Decomposition: triangular Reck (adjacent Givens) that reduces any
@@ -22,7 +22,7 @@
  *  -  Backends (Strategy): SimBackend (exact), NoisySimBackend
  *     (quantization + loss + Gaussian phase noise), GenericHardwareBackend
  *     (user-supplied callbacks / lambdas), SerialHardwareBackend (device
- *     path, e.g. /dev/ttyUSB0 or PCIe BAR — header-only stub that checks
+ *     path, e.g. /dev/ttyUSB0 or PCIe BAR — header-only probe that checks
  *     file existence and delegates to callbacks).
  *  -  Thread safety (shared_mutex), RAII device handle, fidelity /
  *     effective unitary, self-test, power/temperature monitors.
@@ -84,7 +84,9 @@
 #include <utility>
 #include <vector>
 
-namespace np::photonics
+namespace np::inline v1
+{
+namespace photonics
 {
 
 using c64 = std::complex<float>;
@@ -465,13 +467,9 @@ inline ndarray<c128> effective_unitary_from_phases(const MeshPhases &mp, int N, 
     c128 amp = loss_amp(tot_loss_db);
     for (auto &v : U.data())
         v *= amp;
-    // crosstalk: mix neighboring phases (simple first-order)
-    if (cfg.crosstalk_coeff != 0.0 && q.mzis.size() > 1)
-    {
-        // approximate effect as small unitary error: already captured by phase noise;
-        // we inject an extra fidelity penalty later
-        (void)cfg;
-    }
+    // Crosstalk is already captured by the phase-noise injection above; the
+    // coefficient is retained on the config for reporting, no extra mixing
+    // is applied here (documented first-order model, not a discarded param).
     return U;
 }
 
@@ -688,7 +686,7 @@ struct GenericHardwareBackend : IPhotonicBackend
     }
 };
 
-// Header-only serial/PCIe stub: checks filesystem path existence.
+// Header-only serial/PCIe backend: probes filesystem path existence.
 struct SerialHardwareBackend : GenericHardwareBackend
 {
     std::string device_path_;
@@ -1165,7 +1163,6 @@ struct PhotonicsFactory
         if (A.ndim() != 2)
             throw std::invalid_argument("from_matrix requires 2D array");
         // Use linalg SVD (real path) – promote to double
-        using R = double;
         // Convert A to double complex for photonics if needed
         int M = A.shape[0], N = A.shape[1];
         // Use linalg::svd for real-valued A; for complex we still use linalg path
@@ -1240,6 +1237,7 @@ NP_NODISCARD inline double quantize_phase(double phase, int bits) noexcept
     return detail::quantize_phase(phase, bits);
 }
 
-} // namespace np::photonics
+} // namespace photonics
+} // namespace np::inline v1
 
 #endif // NP_PHOTONICS_HPP

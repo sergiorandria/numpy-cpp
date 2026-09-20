@@ -49,7 +49,9 @@
 #include "homotopy.hpp"
 #include "ndarray.hpp"
 
-namespace np::manifold
+namespace np::inline v1
+{
+namespace manifold
 {
 
 // ── Geometry helpers ────────────────────────────────────────────────────
@@ -109,7 +111,10 @@ NP_NODISCARD inline homology::SimplicialComplex sphere_boundary_complex(int n)
         return homology::SimplicialComplex{};
     if (n == 0)
     {
-        return homology::SimplicialComplex{{{{0}}, {{1}}, {}, {}}};
+        // S^0 is two points (H_0 = Z^2). The trailing empty level keeps
+        // homology::betti_numbers() counting both vertices (n_0 comes from
+        // the d_1 matrix shape).
+        return homology::SimplicialComplex{{{{0}, {1}}, {}}};
     }
     if (n == 1)
         return homology::circle_complex();
@@ -147,11 +152,7 @@ NP_NODISCARD inline homology::SimplicialComplex wedge_simplicial(
     int next_id = 1; // 0 reserved for wedge point
     for (auto *K : comps)
     {
-        // map old vertex -> new vertex
-        std::vector<int> vmap;
-        int nverts = K->simplices.empty() ? 0 : static_cast<int>(K->simplices[0].size());
-        // Need vertex count: assume vertices are 0..nverts-1 contiguously
-        // For general complexes vertices may be sparse; collect all vertex ids
+        // Collect all vertex ids (vertices may be sparse, not 0..n-1).
         std::vector<int> all_verts;
         if (!K->simplices.empty() && !K->simplices[0].empty())
         {
@@ -283,6 +284,382 @@ NP_NODISCARD inline std::vector<bigint> kunneth_product_torsion(const std::vecto
     return out;
 }
 
+/**
+ * @brief Top dimension with actual simplices (ignores trailing empty levels).
+ *
+ * `SimplicialComplex::dim()` counts levels; some stored complexes carry a
+ * trailing empty level (e.g. the RP² triangulation below). Homology consumers
+ * need the largest dimension that really occurs (for facet selection).
+ */
+NP_NODISCARD inline int top_dimension(const homology::SimplicialComplex &K)
+{
+    int t = 0;
+    for (size_t d = 0; d < K.simplices.size(); ++d)
+        if (!K.simplices[d].empty())
+            t = static_cast<int>(d);
+    return t;
+}
+
+/**
+ * @brief Kuhn (Freudenthal) triangulation of the d-torus, d >= 3.
+ *
+ * Vertices are the 3^d grid points of (Z/3Z)^d (id = base-3 number). Each
+ * unit cube (product of circle edges [e_i, e_i+1]) is triangulated into d!
+ * simplices, one per axis permutation (chain v_0 < v_1 < ... < v_d stepping
+ * one coordinate at a time). The triangulation is translation-invariant, so
+ * opposite faces match and the result triangulates (S¹)^d with
+ * H_k = Z^C(d,k) (verified for d = 3: Betti [1,3,3,1]).
+ *
+ * Cost is exponential (3^d vertices, 3^d·d! top simplices); use
+ * torus_betti_wedge() for d >= 5.
+ */
+NP_NODISCARD inline homology::SimplicialComplex torus_kuhn_complex(int d)
+{
+    std::vector<int> axes(d);
+    std::iota(axes.begin(), axes.end(), 0);
+    std::vector<std::vector<int>> perms;
+    do
+    {
+        perms.push_back(axes);
+    } while (std::next_permutation(axes.begin(), axes.end()));
+    long long ncubes = 1;
+    for (int i = 0; i < d; ++i)
+        ncubes *= 3;
+    std::vector<std::vector<int>> maxsimp;
+    std::vector<int> e(d), v(d), chain(d + 1);
+    for (long long c = 0; c < ncubes; ++c)
+    {
+        long long t = c;
+        for (int i = 0; i < d; ++i)
+        {
+            e[i] = static_cast<int>(t % 3);
+            t /= 3;
+        }
+        for (const auto &pi : perms)
+        {
+            v = e;
+            auto vid = [&]() {
+                int id = 0;
+                for (int x : v)
+                    id = id * 3 + x;
+                return id;
+            };
+            chain[0] = vid();
+            for (int k = 0; k < d; ++k)
+            {
+                v[pi[k]] = (v[pi[k]] + 1) % 3;
+                chain[k + 1] = vid();
+            }
+            std::sort(chain.begin(), chain.end());
+            maxsimp.push_back(chain);
+        }
+    }
+    homology::SimplicialComplexBuilder b;
+    b.add_maximal(maxsimp);
+    return b.build();
+}
+
+/**
+ * @brief Homology-faithful wedge model of T^d: wedge of C(d,k) k-spheres.
+ *
+ * H_k = Z^C(d,k) by wedge additivity (no torsion), and the Euler number is
+ * 1 + Σ_{k>=1} C(d,k)·(−1)^k = (1−1)^d = 0 = χ(T^d). This is a homology
+ * model, not a manifold triangulation; torus_kuhn_complex() gives the genuine
+ * triangulation for small d.
+ */
+NP_NODISCARD inline homology::SimplicialComplex torus_betti_wedge(int d)
+{
+    std::vector<homology::SimplicialComplex> store;
+    for (int k = 1; k <= d; ++k)
+        for (int i = 0, c = binomial_int(d, k); i < c; ++i)
+            store.push_back(sphere_boundary_complex(k));
+    std::vector<const homology::SimplicialComplex *> parts;
+    parts.reserve(store.size());
+    for (const auto &s : store)
+        parts.push_back(&s);
+    return wedge_simplicial(parts);
+}
+
+/**
+ * @brief Eilenberg–Zilber product triangulation of |A| × |B|.
+ *
+ * Vertices are pairs (u,v) (id = u·|V(B)| + v). For each simplex pair
+ * σ ∈ A, τ ∈ B, every monotone lattice path through the (|σ|−1)×(|τ|−1)
+ * grid contributes one simplex (vertices along the path). With the factors'
+ * natural vertex orders this triangulates the product space, so the result
+ * satisfies Künneth homology (verified: S¹×S¹ gives Betti [1,2,1]).
+ */
+NP_NODISCARD inline homology::SimplicialComplex product_complex(const homology::SimplicialComplex &A,
+                                                                const homology::SimplicialComplex &B)
+{
+    std::set<int> va, vb;
+    if (!A.simplices.empty())
+        for (const auto &s : A.simplices[0])
+            va.insert(s[0]);
+    if (!B.simplices.empty())
+        for (const auto &s : B.simplices[0])
+            vb.insert(s[0]);
+    const std::vector<int> la(va.begin(), va.end()), lb(vb.begin(), vb.end());
+    std::map<int, int> ia, ib;
+    for (size_t i = 0; i < la.size(); ++i)
+        ia[la[i]] = static_cast<int>(i);
+    for (size_t i = 0; i < lb.size(); ++i)
+        ib[lb[i]] = static_cast<int>(i);
+    const int nb = static_cast<int>(lb.size());
+    auto pid = [&](int u, int v) { return u * nb + v; };
+    auto remap = [](const homology::SimplicialComplex &K, const std::map<int, int> &m) {
+        std::vector<std::vector<std::vector<int>>> out(K.simplices.size());
+        for (size_t dd = 0; dd < K.simplices.size(); ++dd)
+            for (auto s : K.simplices[dd])
+            {
+                for (int &x : s)
+                    x = m.at(x);
+                std::sort(s.begin(), s.end());
+                out[dd].push_back(s);
+            }
+        return out;
+    };
+    const auto RA = remap(A, ia), RB = remap(B, ib);
+    homology::SimplicialComplexBuilder b;
+    for (int u = 0; u < static_cast<int>(la.size()); ++u)
+        for (int v = 0; v < nb; ++v)
+            b.add_simplex({pid(u, v)});
+    for (size_t da = 0; da < RA.size(); ++da)
+        for (size_t db = 0; db < RB.size(); ++db)
+            for (const auto &sa : RA[da])
+                for (const auto &sb : RB[db])
+                {
+                    if (sa.empty() || sb.empty())
+                        continue;
+                    const int r = static_cast<int>(sa.size()) - 1;
+                    const int s = static_cast<int>(sb.size()) - 1;
+                    std::vector<int> steps(r + s, 0);
+                    std::fill(steps.end() - s, steps.end(), 1);
+                    do
+                    {
+                        std::vector<int> simp;
+                        int i = 0, j = 0;
+                        simp.push_back(pid(sa[i], sb[j]));
+                        for (int st : steps)
+                        {
+                            if (st == 0)
+                                ++i;
+                            else
+                                ++j;
+                            simp.push_back(pid(sa[i], sb[j]));
+                        }
+                        std::sort(simp.begin(), simp.end());
+                        simp.erase(std::unique(simp.begin(), simp.end()), simp.end());
+                        b.add_simplex(simp);
+                    } while (std::next_permutation(steps.begin(), steps.end()));
+                }
+    return b.build();
+}
+
+/**
+ * @brief Simplicial connected sum of two closed n-manifold triangulations.
+ *
+ * Removes one n-facet from each factor and identifies the two simplex
+ * boundaries vertex-for-vertex. By Mayer–Vietoris the result has connected-sum
+ * homology (H_k sums for 0 < k < n; H_n = Z iff the sum is orientable),
+ * independent of the chosen gluing identification. Verified: T²#T² and
+ * genus-3 (Betti [1,4,1] / [1,6,1]), RP²#RP² = Klein (H₁ = Z + Z/2).
+ */
+NP_NODISCARD inline homology::SimplicialComplex connected_sum_complex(const homology::SimplicialComplex &A,
+                                                                      const homology::SimplicialComplex &B)
+{
+    const int dim = std::max(top_dimension(A), top_dimension(B));
+    if (dim < 2)
+        throw std::invalid_argument("connected_sum_complex: dimension must be >= 2");
+    std::vector<int> fa, fb;
+    if (dim < static_cast<int>(A.simplices.size()) && !A.simplices[dim].empty())
+        fa = A.simplices[dim][0];
+    if (dim < static_cast<int>(B.simplices.size()) && !B.simplices[dim].empty())
+        fb = B.simplices[dim][0];
+    if (static_cast<int>(fa.size()) != dim + 1 || static_cast<int>(fb.size()) != dim + 1)
+        throw std::invalid_argument("connected_sum_complex: factors lack a top facet");
+    std::set<int> va, vb;
+    for (const auto &s : A.simplices[0])
+        va.insert(s[0]);
+    for (const auto &s : B.simplices[0])
+        vb.insert(s[0]);
+    std::map<int, int> mp;
+    int next = va.empty() ? 0 : (*va.rbegin() + 1);
+    for (int v : vb)
+    {
+        const auto it = std::find(fb.begin(), fb.end(), v);
+        if (it != fb.end())
+            mp[v] = fa[static_cast<size_t>(it - fb.begin())];
+        else
+            mp[v] = next++;
+    }
+    homology::SimplicialComplexBuilder b;
+    auto add_without_facet = [&](const homology::SimplicialComplex &K, const std::vector<int> &facet,
+                                 const std::map<int, int> *remap) {
+        auto f = facet;
+        std::sort(f.begin(), f.end());
+        for (size_t dd = 0; dd < K.simplices.size(); ++dd)
+            for (auto s : K.simplices[dd])
+            {
+                if (static_cast<int>(dd) == dim)
+                {
+                    auto t = s;
+                    std::sort(t.begin(), t.end());
+                    if (t == f)
+                        continue;
+                }
+                if (remap != nullptr)
+                    for (int &x : s)
+                        x = remap->at(x);
+                b.add_simplex(s);
+            }
+    };
+    add_without_facet(A, fa, nullptr);
+    add_without_facet(B, fb, &mp);
+    return b.build();
+}
+
+/**
+ * @brief Minimal 6-vertex triangulation of RP² (H = [Z, Z/2, 0], Euler 1).
+ */
+NP_NODISCARD inline homology::SimplicialComplex rp2_complex()
+{
+    return homology::SimplicialComplex{{{{0}, {1}, {2}, {3}, {4}, {5}},
+                                        {{0, 1},
+                                         {0, 2},
+                                         {0, 3},
+                                         {0, 4},
+                                         {0, 5},
+                                         {1, 2},
+                                         {1, 3},
+                                         {1, 4},
+                                         {1, 5},
+                                         {2, 3},
+                                         {2, 4},
+                                         {2, 5},
+                                         {3, 4},
+                                         {3, 5},
+                                         {4, 5}},
+                                        {{0, 1, 2},
+                                         {0, 1, 3},
+                                         {0, 2, 4},
+                                         {0, 3, 5},
+                                         {0, 4, 5},
+                                         {1, 2, 5},
+                                         {1, 3, 4},
+                                         {1, 4, 5},
+                                         {2, 3, 4},
+                                         {2, 3, 5}},
+                                        {}}};
+}
+
+/**
+ * @brief Simplicial Moore space M(Z/p,1): H_0 = Z, H_1 = Z/p, else 0.
+ *
+ * Mapping cone of a simplicial degree-p map S¹ -> S¹, hence a genuine
+ * finite abstract simplicial complex (no quotients, no multi-edges):
+ *   - A = subdivided domain circle on 3p vertices, B = triangle circle,
+ *   - f(i) = b_{i mod 3} wraps p times (consecutive vertices map to
+ *     distinct vertices, so f is simplicial),
+ *   - K = cone(A) ∪ mapping-cylinder(f) ∪ B glued along subcomplexes.
+ * cone(A) is contractible and the cylinder is homotopy-equivalent to B,
+ * so K is B with one 2-cell attached along p·[S¹]: H_1 = Z/p.
+ * Verified: b_1(Q) = 0 with dim H_1(F_p) = 1 for p in {2,3,5,7}.
+ */
+NP_NODISCARD inline homology::SimplicialComplex moore_zp_complex(int p)
+{
+    if (p <= 1)
+        return homology::circle_complex();
+    const int nA = 3 * p;
+    const int b0 = nA, b1 = nA + 1, b2 = nA + 2;
+    const int apex = nA + 3;
+    auto f = [&](int i) { return nA + (i % 3); };
+    homology::SimplicialComplexBuilder b;
+    // Domain circle A.
+    for (int i = 0; i < nA; ++i)
+        b.add_simplex({i, (i + 1) % nA});
+    // Codomain circle B.
+    b.add_simplex({b0, b1});
+    b.add_simplex({b1, b2});
+    b.add_simplex({b0, b2});
+    // Cone on A.
+    for (int i = 0; i < nA; ++i)
+    {
+        const int u = i, v = (i + 1) % nA;
+        b.add_simplex({apex, u});
+        b.add_simplex({apex, u, v});
+    }
+    // Mapping cylinder of f.
+    for (int i = 0; i < nA; ++i)
+        b.add_simplex({i, f(i)});
+    for (int i = 0; i < nA; ++i)
+    {
+        const int u = i, v = (i + 1) % nA;
+        const int fu = f(u), fv = f(v);
+        b.add_simplex({u, v, fv});
+        b.add_simplex({u, fu, fv});
+    }
+    return b.build();
+}
+
+/**
+ * @brief Simplicial model of the lens space L(p,q).
+ *
+ * L(1;q) is S³ and L(2;1) = RP³ is homology-modelled by RP² ∨ S³ (wedge of
+ * the minimal RP² triangulation and the 3-sphere boundary). For p >= 3
+ * the model is M(Z/p,1) ∨ S³: the Moore space above carries H_1 = Z/p
+ * and the 3-sphere boundary carries H_3 = Z, so the wedge is
+ * homology-faithful (H = [Z, Z/p, 0, Z], Euler 0).
+ * Homology is independent of q, which is accepted for API stability.
+ */
+NP_NODISCARD inline homology::SimplicialComplex lens_space_complex(int p, int /*q*/)
+{
+    if (p == 1)
+        return sphere_boundary_complex(3);
+    if (p == 2)
+    {
+        const auto rp2 = rp2_complex();
+        const auto s3 = sphere_boundary_complex(3);
+        return wedge_simplicial({&rp2, &s3});
+    }
+    if (p < 1)
+        throw std::invalid_argument("lens_space_complex: p must be >= 1");
+    const auto moore = moore_zp_complex(p);
+    const auto s3 = sphere_boundary_complex(3);
+    return wedge_simplicial({&moore, &s3});
+}
+
+/**
+ * @brief Simplicial suspension: reduced homology shifts up by exactly one.
+ *
+ * Adds two cone apices; ΣK has H̃_{i+1}(ΣK) = H̃_i(K). Used to build the
+ * mod-2 Moore spaces M(Z/2,k) = Σ^{k-1}(RP²) for real projective spaces.
+ */
+NP_NODISCARD inline homology::SimplicialComplex simplicial_suspension(const homology::SimplicialComplex &K)
+{
+    std::set<int> vs;
+    if (!K.simplices.empty())
+        for (const auto &s : K.simplices[0])
+            vs.insert(s[0]);
+    const int ap = vs.empty() ? 0 : (*vs.rbegin() + 1);
+    const int am = ap + 1;
+    homology::SimplicialComplexBuilder b;
+    b.add_simplex({ap});
+    b.add_simplex({am});
+    for (const auto &lvl : K.simplices)
+        for (auto s : lvl)
+        {
+            b.add_simplex(s);
+            auto s1 = s;
+            s1.push_back(ap);
+            b.add_simplex(s1);
+            auto s2 = s;
+            s2.push_back(am);
+            b.add_simplex(s2);
+        }
+    return b.build();
+}
+
 } // namespace detail
 
 /**
@@ -304,14 +681,16 @@ struct AbstractManifold
      *
      * CONTRACT (honesty audit): this MUST either be homology-faithful
      * (betti_numbers() of the result equals homology() in every degree,
-     * torsion included) or be a documented placeholder. Placeholder
-     * implementations (Lens p>1, genus≥2 skeleta, large projective spaces,
-     * T^d d>2 bouquets, ConnectedSum left-projection) return geometrically
-     * suggestive complexes whose homology is NOT the manifold's — consumers
-     * must treat simplicial agreement as no evidence (see
-     * is_homotopy_equivalent's homology-first ordering) and consult
-     * homology()/homotopy() as authoritative. The simplicial-vs-authoritative
-     * cross-check test pins which manifolds are faithful.
+     * torsion included) or be a documented placeholder. All built-in
+     * manifolds are homology-faithful: spheres/circles/RP²/all lens spaces
+     * L(p,q) (M(Z/p,1) ∨ S³ mapping-cone model) and T²/Klein use genuine
+     * simplicial triangulations; T³/T⁴ use Kuhn triangulations; T^d (d>=5),
+     * CP^n and RP^n (n>=3) use homology-model wedges (spheres / suspended
+     * Moore spaces); genus-g surfaces, products and connected sums use
+     * genuine simplicial connected-sum / staircase product triangulations.
+     * Consumers may still consult homology()/homotopy() as authoritative
+     * (see is_homotopy_equivalent's homology-first ordering). The
+     * simplicial-vs-authoritative cross-check test pins faithfulness.
      */
     virtual homology::SimplicialComplex to_simplicial() const = 0;
     virtual int euler_characteristic() const = 0;
@@ -815,29 +1194,15 @@ struct TorusManifold : AbstractManifold
                 b.add_simplex(t);
             return b.build();
         }
-        // For dim>2, build wedge-like product placeholder whose homology matches
-        // Betti numbers via builder but not faithful triangulation; we note this
-        // is a placeholder and homology() remains authoritative.
-        // Use sphere-like fallback with correct Euler (0) for torus to preserve
-        // Euler check; simplicial Euler may not match Betti Euler for dim>2.
-        // Return a 1-skeleton torus graph with dim rank?
-        // For correctness we return a complex whose Betti matches binomial by
-        // constructing dim-fold wedge of circles plus higher cells as simplices.
-        homology::SimplicialComplexBuilder b;
-        // Create base bouquet of dim circles sharing vertex 0
-        // Each circle i has vertices 0, 3*i+1, 3*i+2 with edges
-        for (int c = 0; c < dim; ++c)
+        if (dim <= 4)
         {
-            int a = (c == 0) ? 1 : 3 * c + 1;
-            int cc = (c == 0) ? 2 : 3 * c + 2;
-            // triangle with base 0: edges 0-a, a-cc, cc-0 gives circle
-            b.add_simplex({0, a});
-            b.add_simplex({a, cc});
-            b.add_simplex({cc, 0});
+            // Genuine Kuhn (Freudenthal) triangulation of (S¹)^dim: 3^dim
+            // vertices, homology-faithful with H_k = Z^C(dim,k).
+            return detail::torus_kuhn_complex(dim);
         }
-        // Higher homology not captured simplicially for dim>2; homology()
-        // is authoritative over to_simplicial() in that regime.
-        return b.build();
+        // Large dimensions: homology-faithful wedge of C(dim,k) k-spheres
+        // (Betti numbers match by wedge additivity, Euler is (1−1)^dim = 0).
+        return detail::torus_betti_wedge(dim);
     }
     int euler_characteristic() const override
     {
@@ -919,10 +1284,9 @@ struct ProjectiveManifold : AbstractManifold
             for (int k = 1; k < n; ++k)
                 if (k % 2 == 1)
                     out[k].torsion = {bigint(2)};
+            // H_n(RP^n) = Z for n odd, 0 for n even (non-orientable).
             if (n % 2 == 1)
                 out[n].betti = 1;
-            else if (n > 0)
-                out[n].torsion = {bigint(2)};
         }
         return out;
     }
@@ -963,38 +1327,40 @@ struct ProjectiveManifold : AbstractManifold
         if (n == 1 && field == "C")
             return homology::sphere_tetrahedron(); // CP1=S2
         if (field == "R" && n == 2)
+            return detail::rp2_complex();
+        if (field == "C")
         {
-            // Minimal 6-vertex triangulation of RP2
-            return homology::SimplicialComplex{{{{0}, {1}, {2}, {3}, {4}, {5}},
-                                                {{0, 1},
-                                                 {0, 2},
-                                                 {0, 3},
-                                                 {0, 4},
-                                                 {0, 5},
-                                                 {1, 2},
-                                                 {1, 3},
-                                                 {1, 4},
-                                                 {1, 5},
-                                                 {2, 3},
-                                                 {2, 4},
-                                                 {2, 5},
-                                                 {3, 4},
-                                                 {3, 5},
-                                                 {4, 5}},
-                                                {{0, 1, 2},
-                                                 {0, 1, 3},
-                                                 {0, 2, 4},
-                                                 {0, 3, 5},
-                                                 {0, 4, 5},
-                                                 {1, 2, 5},
-                                                 {1, 3, 4},
-                                                 {1, 4, 5},
-                                                 {2, 3, 4},
-                                                 {2, 3, 5}},
-                                                {}}};
+            // CP^n has H_{2k} = Z (0 <= k <= n), no torsion: wedge of the
+            // even spheres S^2 ∨ S^4 ∨ ... ∨ S^{2n} is homology-faithful
+            // (Euler 1 + n = n + 1 matches).
+            std::vector<homology::SimplicialComplex> store;
+            for (int k = 1; k <= n; ++k)
+                store.push_back(detail::sphere_boundary_complex(2 * k));
+            std::vector<const homology::SimplicialComplex *> parts;
+            for (const auto &s : store)
+                parts.push_back(&s);
+            return detail::wedge_simplicial(parts);
         }
-        // Higher projective spaces: placeholder simplex; homology() authoritative
-        return detail::sphere_boundary_complex(dimension());
+        // RP^n (n >= 3): H_0 = Z, H_k = Z/2 for odd k < n, H_n = Z (n odd)
+        // or 0 (n even). Wedge of mod-2 Moore spaces M(Z/2,k) =
+        // Σ^{k-1}(RP²) over odd k < n, plus S^n for n odd, is
+        // homology-faithful (each Moore piece contributes exactly its
+        // Z/2, Euler stays 1 for n even and 0 for n odd).
+        std::vector<homology::SimplicialComplex> store;
+        const auto rp2 = detail::rp2_complex();
+        for (int k = 1; k < n; k += 2)
+        {
+            homology::SimplicialComplex m = rp2;
+            for (int s = 1; s < k; ++s)
+                m = detail::simplicial_suspension(m);
+            store.push_back(std::move(m));
+        }
+        if (n % 2 == 1)
+            store.push_back(detail::sphere_boundary_complex(n));
+        std::vector<const homology::SimplicialComplex *> parts;
+        for (const auto &s : store)
+            parts.push_back(&s);
+        return detail::wedge_simplicial(parts);
     }
     int euler_characteristic() const override
     {
@@ -1071,12 +1437,11 @@ struct KleinBottleManifold : AbstractManifold
     }
     homology::SimplicialComplex to_simplicial() const override
     {
-        // 8-vertex triangulation of Klein bottle (similar to torus but twisted)
-        return homology::SimplicialComplex{
-            {{{0}, {1}, {2}, {3}, {4}, {5}, {6}, {7}},
-             {{0, 1}, {1, 2}, {2, 0}, {3, 4}, {4, 5}, {5, 3}, {0, 3}, {1, 4}, {2, 5}, {0, 4}, {1, 5}, {2, 3}},
-             {{0, 1, 4}, {0, 4, 3}, {1, 2, 5}, {1, 5, 4}, {2, 0, 4}, {2, 4, 5}},
-             {}}};
+        // Klein bottle = RP² # RP² (diffeomorphic): genuine simplicial
+        // connected sum of two minimal RP² triangulations. Homology-faithful
+        // with H = [Z, Z + Z/2, 0] and Euler 0.
+        const auto rp2 = detail::rp2_complex();
+        return detail::connected_sum_complex(rp2, rp2);
     }
     int euler_characteristic() const override
     {
@@ -1272,20 +1637,13 @@ struct GenusGSurfaceManifold : AbstractManifold
             return homology::sphere_tetrahedron();
         if (g == 1)
             return TorusManifold(2).to_simplicial();
-        // Genus >= 2: return the 1-skeleton (wedge of 2g circles), which is
-        // H_1/pi_1-faithful. Closing the surface needs a 2-cell along the
-        // product of commutators, not a single simplex; homology() and
-        // euler_characteristic() stay authoritative.
-        homology::SimplicialComplexBuilder b;
-        for (int c = 0; c < 2 * g; ++c)
-        {
-            int a = 3 * c + 1;
-            int cc = 3 * c + 2;
-            b.add_simplex({0, a});
-            b.add_simplex({a, cc});
-            b.add_simplex({cc, 0});
-        }
-        return b.build();
+        // Genus >= 2: genuine triangulation as the iterated connected sum of
+        // g tori (Σ_g = T² # ... # T²), homology-faithful with
+        // H = [Z, Z^{2g}, Z] and Euler 2 − 2g.
+        homology::SimplicialComplex acc = TorusManifold(2).to_simplicial();
+        for (int i = 1; i < g; ++i)
+            acc = detail::connected_sum_complex(acc, TorusManifold(2).to_simplicial());
+        return acc;
     }
     int euler_characteristic() const override
     {
@@ -1430,11 +1788,7 @@ struct LensSpaceManifold : AbstractManifold
     }
     homology::SimplicialComplex to_simplicial() const override
     {
-        if (p == 1)
-            return detail::sphere_boundary_complex(3);
-        // Faithful lens triangulations need many vertices (linear in p);
-        // homology()/homotopy() stay authoritative for p > 1.
-        return detail::sphere_boundary_complex(3);
+        return detail::lens_space_complex(p, q);
     }
     int euler_characteristic() const override
     {
@@ -1594,10 +1948,12 @@ struct ProductManifold : AbstractManifold
             if (d0 == 1 && d1 == 1)
                 return TorusManifold(2).to_simplicial();
         }
-        // Full product triangulation (staircase subdivision) is non-trivial;
-        // homology() stays authoritative and simplicial output is a
-        // homology-faithful placeholder only for the cases above.
-        return factors[0]->to_simplicial();
+        // General case: iterated Eilenberg–Zilber staircase triangulation
+        // of the product, homology-faithful by the Künneth theorem.
+        homology::SimplicialComplex acc = factors[0]->to_simplicial();
+        for (size_t i = 1; i < factors.size(); ++i)
+            acc = detail::product_complex(acc, factors[i]->to_simplicial());
+        return acc;
     }
     int euler_characteristic() const override
     {
@@ -1824,9 +2180,9 @@ struct ConnectedSumManifold : AbstractManifold
     }
     homology::SimplicialComplex to_simplicial() const override
     {
-        // No generic simplicial connected-sum construction; homology()
-        // stays authoritative.
-        return left->to_simplicial();
+        // Genuine simplicial connected sum (remove one top facet per side,
+        // identify simplex boundaries); homology-faithful by Mayer–Vietoris.
+        return detail::connected_sum_complex(left->to_simplicial(), right->to_simplicial());
     }
     int euler_characteristic() const override
     {
@@ -2089,10 +2445,13 @@ NP_NODISCARD inline bool is_homotopy_equivalent(const AbstractManifold &A, const
     return homotopy::is_homotopy_equivalent(A.to_simplicial(), B.to_simplicial()).equivalent;
 }
 
-} // namespace np::manifold
+} // namespace manifold
+} // namespace np::inline v1
 
 // ── Backward compatibility: variety is now manifold ──────────────────────
-namespace np::variety
+namespace np::inline v1
+{
+namespace variety
 {
 using AbstractVariety = manifold::AbstractManifold;
 using SphereVariety = manifold::SphereManifold;
@@ -2150,6 +2509,7 @@ inline auto lens_space(int p, int q = 1)
 {
     return std::make_unique<manifold::LensSpaceManifold>(p, q);
 }
-} // namespace np::variety
+} // namespace variety
+} // namespace np::inline v1
 
 #endif // NP_MANIFOLD_HPP

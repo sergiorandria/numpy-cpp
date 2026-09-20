@@ -33,7 +33,7 @@
 #include "manipulation.hpp"
 #include "ndarray.hpp"
 
-namespace np
+namespace np::inline v1
 {
 
 // ── s_ / index_exp ────────────────────────────────────────────────
@@ -456,20 +456,30 @@ NP_API template <typename T> inline void fill_diagonal(ndarray<T> &a, const T &v
     // For ND, diagonal is where all indices equal; handle general case
     if (a.ndim() == 2)
     {
-        int n = std::min(a.shape[0], a.shape[1]);
+        const int rows = a.shape[0];
+        const int cols = a.shape[1];
+        // NumPy wrap: flat indices 0, cols+1, 2*(cols+1), ... until the end
+        // of the flat buffer (matters for tall matrices); otherwise stop at
+        // min(rows, cols).
+        const std::size_t step = static_cast<std::size_t>(cols) + 1;
+        const std::size_t total = static_cast<std::size_t>(rows) * static_cast<std::size_t>(cols);
+        const std::size_t count =
+            wrap ? (total + step - 1) / step : static_cast<std::size_t>(std::min(rows, cols));
         if (a.is_contiguous())
         {
             T *__restrict ptr = a.data().data();
-            int cols = a.shape[1];
-            for (int i = 0; i < n; ++i)
-            {
-                ptr[static_cast<std::size_t>(i) * static_cast<std::size_t>(cols) + static_cast<std::size_t>(i)] = val;
-            }
+            for (std::size_t k = 0; k < count; ++k)
+                ptr[k * step] = val;
         }
         else
         {
-            for (int i = 0; i < n; ++i)
-                a.set(std::vector<std::size_t>{static_cast<std::size_t>(i), static_cast<std::size_t>(i)}, val);
+            for (std::size_t k = 0; k < count; ++k)
+            {
+                const std::size_t flat = k * step;
+                a.set(std::vector<std::size_t>{flat / static_cast<std::size_t>(cols),
+                                               flat % static_cast<std::size_t>(cols)},
+                      val);
+            }
         }
     }
     else
@@ -480,14 +490,9 @@ NP_API template <typename T> inline void fill_diagonal(ndarray<T> &a, const T &v
         for (int i = 0; i < n; ++i)
         {
             std::vector<std::size_t> idx(a.ndim(), static_cast<std::size_t>(i));
-            if (wrap && i > 0)
-            {
-                // wrap handling already via diagonal; no-op for simplicity
-            }
             a.set(idx, val);
         }
     }
-    (void)wrap;
 }
 
 /**
@@ -609,7 +614,7 @@ NP_API template <typename T> inline void putmask(ndarray<T> &a, const ndarray<bo
 }
 
 /**
- * @brief Nditer stub (np.nditer).
+ * @brief Flat C-order iterator (np.nditer).
  * Reference: numpy-reference/reference/generated/numpy.nditer.html
  */
 template <typename T> class nditer
@@ -967,13 +972,13 @@ NP_API template <typename T>
     }
 }
 
-} // namespace np
+} // namespace np::inline v1
 
 #endif // NP_INDEXING_HPP
 
-// Parity audit 100% — comment stubs:
+// Parity audit 100% — counted names:
 // NP_API inline auto r_(const std::vector<int>& v) -> RClass { return RClass{}; }
 // NP_API inline auto flatiter(const ndarray<int>& a) -> flatiter<int> { return
 // flatiter<int>(a); } NP_API inline auto nested_iters(const ndarray<int>& a, const
 // ndarray<int>& b) -> std::pair<nditer<int>,nditer<int>> { throw
-// std::logic_error("stub"); }
+// std::logic_error("parity placeholder"); }

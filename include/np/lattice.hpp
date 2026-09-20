@@ -11,7 +11,7 @@
  *   - `PosetLattice<T>` (finite poset lattice, order-theoretic):
  *     meet/join, is_lattice, is_distributive/modular, hasse_diagram,
  *     mobius, zeta, atoms/coatoms.
- *   - Factory `LatticeFactory` — cubic, hexagonal, A_n, D_n, E8, Leech stub.
+ *   - Factory `LatticeFactory` — cubic, hexagonal, A_n, D_n, E8, Leech Λ24.
  *   - Builder `LatticeBuilder<T>` fluent.
  *   - Strategies `IReductionStrategy<T>` — `LLLStrategy`, `WindowedLLLStrategy`
  *     (sliding-window LLL; not full BKZ enumeration).
@@ -37,8 +37,10 @@
 #define NP_LATTICE_HPP
 
 #include <algorithm>
+#include <bit>
 #include <cmath>
 #include <concepts>
+#include <cstdint>
 #include <functional>
 #include <map>
 #include <memory>
@@ -61,7 +63,9 @@
 #include "linalg.hpp"
 #include "ndarray.hpp"
 
-namespace np::lattice
+namespace np::inline v1
+{
+namespace lattice
 {
 
 // ── Concepts ────────────────────────────────────────────────────────────
@@ -1020,6 +1024,61 @@ template <LatticeScalar T> struct TransformedLattice
 };
 
 // ── Factory (Factory pattern) ───────────────────────────────────────────
+namespace detail
+{
+// Extended binary Golay code G24 (length 24, dimension 12, distance 8) via
+// the cyclic quadratic-residue construction: codewords m(x)*g(x) mod x^23+1
+// with g(x) = x^11+x^10+x^6+x^5+x^4+x^2+1, extended by an overall parity bit
+// at position 23. Verified weight enumerator {0:1, 8:759, 12:2576, 16:759,
+// 24:1} (see test_lattice.cpp). Used for the Leech lattice lifting below.
+constexpr std::uint32_t kGolayGen = 0xC75u;    // generator polynomial bits
+constexpr std::uint32_t kGolayMod = 0x800001u; // x^23 + 1 (reduction modulus)
+
+NP_NODISCARD inline std::uint32_t golay_mul(std::uint32_t a, std::uint32_t b) noexcept
+{
+    std::uint32_t r = 0;
+    while (b != 0)
+    {
+        if ((b & 1u) != 0)
+            r ^= a;
+        a <<= 1;
+        b >>= 1;
+    }
+    return r;
+}
+
+NP_NODISCARD inline std::uint32_t golay_mod(std::uint32_t a) noexcept
+{
+    // Reduce modulo x^23 + 1 by clearing the top bit wherever it sits at or
+    // above position 23 (operands here stay below 2^24; exact in uint32_t).
+    while (a >= (1u << 23))
+    {
+        const unsigned top = 31u - static_cast<unsigned>(std::countl_zero(a));
+        a ^= kGolayMod << (top - 23);
+    }
+    return a;
+}
+
+NP_NODISCARD inline int golay_weight(std::uint32_t w) noexcept
+{
+    return static_cast<int>(std::popcount(w & 0xFFFFFFu));
+}
+
+// All 4096 codewords (24-bit, bit i = coordinate i, bit 23 = parity).
+NP_NODISCARD inline std::vector<std::uint32_t> golay24_codewords()
+{
+    std::vector<std::uint32_t> out;
+    out.reserve(4096);
+    for (std::uint32_t m = 0; m < (1u << 12); ++m)
+    {
+        const std::uint32_t w = golay_mod(golay_mul(m, kGolayGen));
+        const std::uint32_t parity = static_cast<std::uint32_t>(golay_weight(w) & 1);
+        out.push_back(w | (parity << 23));
+    }
+    return out;
+}
+} // namespace detail
+
 struct LatticeFactory
 {
     template <LatticeScalar T = double> NP_NODISCARD static Lattice<T> cubic(int n, T scale = T(1))
@@ -1070,24 +1129,61 @@ struct LatticeFactory
     }
     template <LatticeScalar T = double> NP_NODISCARD static Lattice<T> e8()
     {
-        // E8 root lattice 8x8
+        // E8 root lattice via Bourbaki simple roots (even unimodular, det ±1,
+        // 240 roots). The naive A7-roots-plus-spinor choice only spans an
+        // index-2 sublattice (det ±2: with A7 rows fixed, det = |Σv| ≥ 2 for
+        // every v ∈ E8), hence the full simple system below.
         ndarray<T> B(std::vector<int>{8, 8});
         for (int i = 0; i < 8; ++i)
             for (int j = 0; j < 8; ++j)
                 B(i, j) = T(0);
-        for (int i = 0; i < 7; ++i)
+        B(0, 0) = T(0.5);
+        for (int j = 1; j < 7; ++j)
+            B(0, j) = T(-0.5);
+        B(0, 7) = T(0.5);
+        B(1, 0) = T(1);
+        B(1, 1) = T(1);
+        for (int i = 2; i < 8; ++i)
         {
-            B(i, i) = T(1);
-            B(i, i + 1) = T(-1);
+            B(i, i - 2) = T(-1);
+            B(i, i - 1) = T(1);
         }
-        B(7, 0) = T(0.5);
-        B(7, 1) = T(-0.5);
-        B(7, 2) = T(-0.5);
-        B(7, 3) = T(-0.5);
-        B(7, 4) = T(-0.5);
-        B(7, 5) = T(-0.5);
-        B(7, 6) = T(-0.5);
-        B(7, 7) = T(0.5);
+        return Lattice<T>(B);
+    }
+    template <LatticeScalar T = double> NP_NODISCARD static Lattice<T> leech()
+    {
+        // Leech lattice Λ24: the unique even unimodular lattice in R^24 with
+        // minimal norm 4 (Niemeier classification). Golay-code lifting: with
+        // G24 from detail::golay24_* above, Λ24 = M/√8 for M ⊂ Z^24 spanned by
+        //   - 12 code lifts 2c (c = cyclic shifts x^i·g, i = 0..11),
+        //   - 11 pair vectors 4e0 + 4ej (j = 1..11),
+        //   - one odd vector below (admitted by the uniform-parity /
+        //     mod-8-sum / mod-4-support rules, which predict the exact
+        //     minimal-vector census 1104 + 97152 + 98304).
+        // The integer preimage has exact determinant 2^36 (⇒ det Λ24 = 1),
+        // even Gram matrix and no roots — verified in test_lattice.cpp, which
+        // pins this basis (including the hardcoded odd row below).
+        const double inv_sqrt8 = 1.0 / std::sqrt(8.0);
+        ndarray<T> B(std::vector<int>{24, 24});
+        for (int i = 0; i < 12; ++i)
+        {
+            const std::uint32_t w =
+                detail::golay_mod(detail::golay_mul(1u << static_cast<unsigned>(i), detail::kGolayGen));
+            for (int j = 0; j < 23; ++j)
+                B(i, j) = static_cast<T>((((w >> static_cast<unsigned>(j)) & 1u) != 0u ? 2 : 0) * inv_sqrt8);
+            B(i, 23) = static_cast<T>(((std::popcount(w) & 1) != 0 ? 2 : 0) * inv_sqrt8);
+        }
+        for (int j = 1; j <= 11; ++j)
+        {
+            const int r = 11 + j;
+            for (int k = 0; k < 24; ++k)
+                B(r, k) = T(0);
+            B(r, 0) = static_cast<T>(4 * inv_sqrt8);
+            B(r, j) = static_cast<T>(4 * inv_sqrt8);
+        }
+        static constexpr int kOdd[24] = {3, -1, -1, -1, -1, 1, 1, -1, 1, 1, -1, 1, -1, 1, 1, 1, 1, 1, 1, 1, 1, 1, 1, 1};
+        for (int k = 0; k < 24; ++k)
+            B(23, k) = static_cast<T>(kOdd[k] * inv_sqrt8);
         return Lattice<T>(B);
     }
     template <Ordered T = int> NP_NODISCARD static PosetLattice<T> boolean_lattice(int n)
@@ -1212,6 +1308,7 @@ template <Ordered T> NP_NODISCARD inline std::optional<T> join(const PosetLattic
     return p.join(a, b);
 }
 
-} // namespace np::lattice
+} // namespace lattice
+} // namespace np::inline v1
 
 #endif // NP_LATTICE_HPP

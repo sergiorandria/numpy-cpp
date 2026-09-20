@@ -13,6 +13,7 @@
 #ifndef NP_BITWISE_HPP
 #define NP_BITWISE_HPP
 
+#include <bit>
 #include <cstddef>
 #include <cstdint>
 #include <optional>
@@ -25,7 +26,7 @@
 #include "ndarray.hpp"
 #include "pqc.hpp"
 
-namespace np
+namespace np::inline v1
 {
 
 namespace detail
@@ -168,19 +169,9 @@ NP_API template <typename T> NP_NODISCARD auto bitwise_count(const ndarray<T> &x
     {
         using U = std::make_unsigned_t<T>;
         U v = static_cast<U>(x.data()[x._flat_logical(i)]);
-        int cnt = 0;
-        if constexpr (sizeof(U) <= sizeof(unsigned int))
-        {
-            cnt = __builtin_popcount(static_cast<unsigned int>(v));
-        }
-        else if constexpr (sizeof(U) <= sizeof(unsigned long))
-        {
-            cnt = __builtin_popcountl(static_cast<unsigned long>(v));
-        }
-        else
-        {
-            cnt = __builtin_popcountll(static_cast<unsigned long long>(v));
-        }
+        // std::popcount (C++20 <bit>) — portable across GCC/Clang/MSVC
+        // (no __builtin_popcount / __popcnt intrinsic needed).
+        const int cnt = static_cast<int>(std::popcount(v));
         out.data()[i] = static_cast<std::uint8_t>(cnt);
     }
     return out;
@@ -548,6 +539,6 @@ NP_API inline auto binary_repr(long long num, std::optional<int> width = std::nu
     return s;
 }
 
-} // namespace np
+} // namespace np::inline v1
 
 #endif // NP_BITWISE_HPP

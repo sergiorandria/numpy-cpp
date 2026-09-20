@@ -246,14 +246,14 @@ int main()
         test::check(agrees(np::manifold::make_sphere(2)), "simplicial agrees S2");
         test::check(agrees(np::manifold::TorusManifold(2)), "simplicial agrees T2");
         test::check(agrees(np::manifold::make_sphere(1)), "simplicial agrees S1");
-        // Documented placeholders (disagreement is known, not a regression):
-        test::check(!agrees(np::manifold::make_lens_space(5, 1)), "placeholder Lens(5) differs");
-        test::check(!agrees(np::manifold::GenusGSurfaceManifold(2)), "placeholder genus-2 differs");
-        test::check(!agrees(np::manifold::ProjectiveManifold("C", 2)), "placeholder CP2 differs");
-        test::check(!agrees(np::manifold::TorusManifold(3)), "placeholder T3 differs");
+        test::check(agrees(np::manifold::make_lens_space(5, 1)), "simplicial agrees Lens(5)");
+        test::check(agrees(np::manifold::make_lens_space(3, 1)), "simplicial agrees Lens(3)");
+        test::check(agrees(np::manifold::GenusGSurfaceManifold(2)), "simplicial agrees genus-2");
+        test::check(agrees(np::manifold::ProjectiveManifold("C", 2)), "simplicial agrees CP2");
+        test::check(agrees(np::manifold::TorusManifold(3)), "simplicial agrees T3");
         auto cs = np::manifold::make_connected_sum(std::make_unique<np::manifold::TorusManifold>(2),
                                                    std::make_unique<np::manifold::TorusManifold>(2));
-        test::check(!agrees(cs), "placeholder connected-sum differs");
+        test::check(agrees(cs), "simplicial agrees connected-sum");
     }
 
     return test::failures() ? 1 : 0;

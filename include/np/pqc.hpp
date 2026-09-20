@@ -31,6 +31,9 @@
 #include "api_macros.hpp"
 
 #if defined(_WIN32)
+#ifndef NOMINMAX
+#define NOMINMAX
+#endif
 #ifndef WIN32_LEAN_AND_MEAN
 #define WIN32_LEAN_AND_MEAN
 #endif
@@ -64,7 +67,7 @@ static constexpr const char *NP_PQC_ALG_NAME = NP_PQC_STR(__NUMPY_PQC_ALG);
 static constexpr const char *NP_PQC_ALG_NAME = "none";
 #endif
 
-namespace np
+namespace np::inline v1
 {
 namespace pqc
 {
@@ -681,9 +684,9 @@ NP_API inline void ct_barrier() noexcept
 // ── Algorithm-specific thin wrappers (used when __NUMPY_PQC_ALG is defined) ──
 // These do not bundle a full Kyber/Dilithium implementation; they provide
 // the integration points expected by the library (constant-time
-// encapsulation / signing stubs) so that downstream code can
+// encapsulation / signing wrappers) so that downstream code can
 // `#ifdef __NUMPY_PQC_ALG` and link against liboqs / pq-crystals.
-// The default stubs are constant-time and zeroize on destruction.
+// The default wrappers are constant-time and zeroize on destruction.
 
 namespace detail
 {
@@ -728,11 +731,10 @@ NP_API inline const char *pqc_alg_name() noexcept
     return NP_PQC_ALG_NAME;
 }
 
-// Example KEM stub – replace with liboqs `OQS_KEM_ml_kem_768_encaps` via linkage
+// Example KEM integration point – replace with liboqs `OQS_KEM_ml_kem_768_encaps` via linkage
 // when available. Keeps constant-time compare and secure_zero.
-NP_API inline bool pqc_kem_encaps_stub(const std::vector<std::uint8_t> & /*pubkey*/,
-                                       std::vector<std::uint8_t> &ciphertext,
-                                       std::vector<std::uint8_t> &shared_secret) noexcept
+NP_API inline bool pqc_kem_encaps(const std::vector<std::uint8_t> & /*pubkey*/, std::vector<std::uint8_t> &ciphertext,
+                                  std::vector<std::uint8_t> &shared_secret) noexcept
 {
     // Constant-time dummy: fill with deterministic pattern, barrier
     ct_barrier();
@@ -741,9 +743,10 @@ NP_API inline bool pqc_kem_encaps_stub(const std::vector<std::uint8_t> & /*pubke
     ct_barrier();
     return true;
 }
+
 #endif // NP_PQC_ENABLED
 
 } // namespace pqc
-} // namespace np
+} // namespace np::inline v1
 
 #endif // NP_PQC_HPP

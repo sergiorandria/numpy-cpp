@@ -17,10 +17,21 @@ jobs:
         run: cmake -S . -B build -DCMAKE_BUILD_TYPE=Release -DNP_WERROR=ON
       - name: Build
         run: cmake --build build -j8
-      - name: Test 49/49
+      - name: Test 52/52
         run: ctest --test-dir build --output-on-failure
       - name: Bench hardware (smoke)
         run: ./build/tests/bench_hardware || true
+
+  windows:
+    runs-on: windows-latest
+    steps:
+      - uses: actions/checkout@v4
+      - name: Configure (MSVC, Release)
+        run: cmake -S . -B build -DCMAKE_BUILD_TYPE=Release -DNP_WERROR=ON
+      - name: Build
+        run: cmake --build build --config Release --parallel 8
+      - name: Test
+        run: ctest --test-dir build -C Release --output-on-failure
 
   sanitize:
     runs-on: ubuntu-latest

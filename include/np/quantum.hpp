@@ -49,7 +49,9 @@
 #define NP_HAS_BOOST_COMPLEX 1
 #endif
 
-namespace np::quantum
+namespace np::inline v1
+{
+namespace quantum
 {
 
 #ifndef __NP_C64_DTYPE_STD
@@ -194,7 +196,7 @@ class StateVector : public IStateVector<c128>
             return outcome;
 
         for (size_t i = 0; i < amps.size(); ++i)
-            if (((i >> qubit) & 1) != outcome)
+            if (((i >> qubit) & 1) != static_cast<std::size_t>(outcome))
                 amps[i] = c128(0, 0);
             else
                 amps[i] = static_cast<c128>(amps[i]) / norm_factor;
@@ -764,6 +766,7 @@ struct NoisyStateVector
     }
 };
 
-} // namespace np::quantum
+} // namespace quantum
+} // namespace np::inline v1
 
 #endif // NP_QUANTUM_HPP

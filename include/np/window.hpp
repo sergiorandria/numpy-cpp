@@ -18,7 +18,7 @@
 #include "ndarray.hpp"
 #include "powerful.hpp"
 
-namespace np
+namespace np::inline v1
 {
 
 /**
@@ -187,6 +187,6 @@ NP_API inline auto kaiser(int M, double beta) -> ndarray<double>
     return w;
 }
 
-} // namespace np
+} // namespace np::inline v1
 
 #endif // NP_WINDOW_HPP

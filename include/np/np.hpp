@@ -10,6 +10,7 @@
 #ifndef NP_NP_HPP
 #define NP_NP_HPP
 
+#include "abi.hpp"
 #include "accelerator.hpp"
 #include "api_macros.hpp"
 #include "bigint.hpp"
@@ -68,6 +69,7 @@
 #include "testing.hpp"
 #include "threadpool.hpp"
 #include "variety.hpp"
+#include "vecmath.hpp"
 #include "window.hpp"
 
 // NOTE: No blanket -Wbraced-scalar-init suppression here. That warning is

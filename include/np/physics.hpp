@@ -26,7 +26,9 @@
 #include <utility>
 #include <vector>
 
-namespace np::physics
+namespace np::inline v1
+{
+namespace physics
 {
 
 namespace detail
@@ -1204,7 +1206,7 @@ struct Burgers1D
         const double h = dx();
         for (int i = 0; i < nx; ++i)
         {
-            u(i) = amp * std::sin(2.0 * M_PI * i * h / L);
+            u(i) = amp * std::sin(2.0 * std::numbers::pi * i * h / L);
         }
     }
 
@@ -2311,7 +2313,7 @@ struct HarmonicOscillator
 
     NP_NODISCARD double period() const
     {
-        return 2.0 * M_PI * std::sqrt(m / k);
+        return 2.0 * std::numbers::pi * std::sqrt(m / k);
     }
 };
 
@@ -2347,7 +2349,7 @@ struct Pendulum
     /// Small-angle period 2π√(L/g).
     NP_NODISCARD double period_small() const
     {
-        return 2.0 * M_PI * std::sqrt(L / g);
+        return 2.0 * std::numbers::pi * std::sqrt(L / g);
     }
 };
 
@@ -3149,6 +3151,7 @@ NP_NODISCARD inline double stokes_drag(double mu, double r, double v) noexcept
     return 6.0 * constants::pi * mu * r * v;
 }
 
-} // namespace np::physics
+} // namespace physics
+} // namespace np::inline v1
 
 #endif // NP_PHYSICS_HPP

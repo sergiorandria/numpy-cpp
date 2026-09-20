@@ -1,4 +1,5 @@
 #include "../include/np/np.hpp"
+#include <numbers>
 
 int main() {
     // Create arrays
@@ -9,7 +10,7 @@ int main() {
     b.print();
     c.print();
     // Mathematical operations
-    auto x = np::linspace<double>(0.0, 2.0 * M_PI, 100);
+    auto x = np::linspace<double>(0.0, 2.0 * std::numbers::pi, 100);
     auto y = np::sin(x);  // Element-wise sine
     x.print(); y.print();
     // Array operations with broadcasting

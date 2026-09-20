@@ -51,7 +51,7 @@
 #include "threadpool.hpp"
 #endif
 
-namespace np
+namespace np::inline v1
 {
 namespace matrix
 {
@@ -5984,7 +5984,6 @@ template <typename T> void ndarray<T>::resize(const std::vector<int> &new_shape)
     strides = _c_strides(new_shape);
     offset = 0;
     data_ = std::make_shared<std::vector<value_type>>(std::move(flat));
-    type = type;
 }
 
 // Manipulation
@@ -7809,6 +7808,6 @@ template <typename T> template <typename U> ndarray<T> &ndarray<T>::operator/=(c
     return *this;
 }
 
-} // namespace np
+} // namespace np::inline v1
 
 #endif // NP_NDARRAY_HPP

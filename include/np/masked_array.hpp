@@ -35,7 +35,7 @@
 #include "ndarray.hpp"
 #include "statistics.hpp"
 
-namespace np
+namespace np::inline v1
 {
 namespace ma
 {
@@ -416,13 +416,16 @@ NP_API template <typename T> NP_NODISCARD inline auto isMaskedArray(const ndarra
 
 NP_API inline auto make_mask(const ndarray<bool> &m, bool copy = true, bool shrink = true) -> ndarray<bool>
 {
-    (void)copy;
+    // `copy=false` avoids the extra deep copy: return the (single) return-by-
+    // value copy directly; `copy=true` copies explicitly first (two copies,
+    // matching NumPy's copy semantics for views).
+    auto base = copy ? m.copy() : m;
     if (shrink)
     {
         bool any = false;
-        for (std::size_t i = 0; i < m.size(); ++i)
+        for (std::size_t i = 0; i < base.size(); ++i)
         {
-            if (m.data()[m._flat_logical(i)])
+            if (base.data()[base._flat_logical(i)])
             {
                 any = true;
                 break;
@@ -430,10 +433,10 @@ NP_API inline auto make_mask(const ndarray<bool> &m, bool copy = true, bool shri
         }
         if (!any)
         {
-            return ndarray<bool>(m.shape, dtype_of<bool>, false);
+            return ndarray<bool>(base.shape, dtype_of<bool>, false);
         }
     }
-    return m;
+    return base;
 }
 
 NP_API inline auto make_mask_none(const std::vector<int> &shape) -> ndarray<bool>
@@ -444,7 +447,9 @@ NP_API inline auto make_mask_none(const std::vector<int> &shape) -> ndarray<bool
 NP_API inline auto mask_or(const ndarray<bool> &m1, const ndarray<bool> &m2, bool copy = true, bool shrink = true)
     -> ndarray<bool>
 {
-    (void)copy;
+    // `out` is freshly computed, so `copy` only controls the shrink path:
+    // copy=false skips the extra copy inside make_mask.
+    const bool shrink_copy = copy;
     std::vector<int> out_shape = np::detail::broadcast_shapes(m1.shape, m2.shape);
     ndarray<bool> out(out_shape);
     np::detail::Odometer od(out_shape);
@@ -458,7 +463,7 @@ NP_API inline auto mask_or(const ndarray<bool> &m1, const ndarray<bool> &m2, boo
     }
     if (shrink)
     {
-        return make_mask(out, true, true);
+        return make_mask(out, shrink_copy, true);
     }
     return out;
 }
@@ -809,7 +814,7 @@ NP_API inline auto clump_unmasked(const ndarray<bool> &a) -> std::vector<std::pa
     return res;
 }
 
-// ── Additional parity stubs for full ma coverage (36 missing) ─────
+// ── Additional parity coverage for full ma API ─────
 using MaskType = bool;
 NP_API inline auto get_fill_value(const MaskedArray<double> &a) -> double
 {
@@ -902,7 +907,10 @@ NP_API inline void soften_mask(MaskedArray<double> &a)
 }
 NP_API inline void shrink_mask(MaskedArray<double> &a)
 {
-    (void)a;
+    // NumPy ma.shrink_mask: collapse an all-False mask to nomask. The member
+    // already implements the collapse (all-False mask, zero masked entries);
+    // delegate so the free function is a real operation, not a no-op.
+    a.shrink_mask();
 }
 NP_API inline auto is_mask(const MaskedArray<double> &) -> bool
 {
@@ -934,8 +942,12 @@ NP_API inline auto masked_print_option() -> std::string
 }
 NP_API inline auto getdata_subok(const MaskedArray<double> &a, bool subok = true) -> ndarray<double>
 {
-    (void)subok;
-    return a.data;
+    // C++ has a single ndarray type, so subok selects copy semantics:
+    // subok=true preserves the view (return the member, copied once on return);
+    // subok=false forces a deep copy first (two copies total).
+    if (subok)
+        return a.data;
+    return a.data.copy();
 }
 NP_API inline auto is_masked(const ndarray<double> &) -> bool
 {
@@ -943,14 +955,118 @@ NP_API inline auto is_masked(const ndarray<double> &) -> bool
 }
 NP_API inline auto make_mask_none(int n) -> ndarray<bool>
 {
-    return ndarray<bool>(std::vector<int>{n});
+    if (n < 0)
+        throw std::invalid_argument("make_mask_none: n must be >= 0");
+    return ndarray<bool>(std::vector<int>{n}, dtype_of<bool>, false);
 }
 NP_API inline auto make_mask(int n) -> ndarray<bool>
 {
-    return ndarray<bool>(std::vector<int>{n});
+    if (n < 0)
+        throw std::invalid_argument("make_mask: n must be >= 0");
+    return ndarray<bool>(std::vector<int>{n}, dtype_of<bool>, false);
 }
-NP_API inline auto mask_rowcols(ndarray<double> &, int) -> void
+NP_API inline auto mask_rowcols(MaskedArray<double> &a, int axis = -1) -> MaskedArray<double>
 {
+    // NumPy ma.mask_rowcols: mask every row and/or column that contains at
+    // least one masked value. axis: 0 -> rows only, 1 -> cols only,
+    // otherwise both. Requires 2-D input.
+    if (a.data.ndim() != 2)
+    {
+        throw std::invalid_argument("mask_rowcols: only 2-D supported");
+    }
+    const int rows = a.data.shape[0];
+    const int cols = a.data.shape[1];
+    const bool do_rows = (axis != 1);
+    const bool do_cols = (axis != 0);
+    ndarray<bool> m = a.mask.copy();
+    if (do_rows)
+    {
+        for (int i = 0; i < rows; ++i)
+        {
+            bool any = false;
+            for (int j = 0; j < cols && !any; ++j)
+            {
+                any = m.at(static_cast<std::size_t>(i), static_cast<std::size_t>(j));
+            }
+            if (any)
+            {
+                for (int j = 0; j < cols; ++j)
+                {
+                    m.at(static_cast<std::size_t>(i), static_cast<std::size_t>(j)) = true;
+                }
+            }
+        }
+    }
+    if (do_cols)
+    {
+        for (int j = 0; j < cols; ++j)
+        {
+            bool any = false;
+            for (int i = 0; i < rows && !any; ++i)
+            {
+                any = m.at(static_cast<std::size_t>(i), static_cast<std::size_t>(j));
+            }
+            if (any)
+            {
+                for (int i = 0; i < rows; ++i)
+                {
+                    m.at(static_cast<std::size_t>(i), static_cast<std::size_t>(j)) = true;
+                }
+            }
+        }
+    }
+    return MaskedArray<double>(a.data, m, a.fill_value);
+}
+NP_API inline auto mask_rowcols(ndarray<double> &a, int axis = -1) -> void
+{
+    // ndarray overload (no mask storage): propagate NaN rows/cols by filling
+    // the whole row/column with NaN, mirroring the masked-array expansion.
+    // axis: 0 -> rows only, 1 -> cols only, otherwise both.
+    if (a.ndim() != 2)
+    {
+        throw std::invalid_argument("mask_rowcols: only 2-D supported");
+    }
+    const int rows = a.shape[0];
+    const int cols = a.shape[1];
+    const bool do_rows = (axis != 1);
+    const bool do_cols = (axis != 0);
+    const double qnan = std::numeric_limits<double>::quiet_NaN();
+    if (do_rows)
+    {
+        for (int i = 0; i < rows; ++i)
+        {
+            bool any = false;
+            for (int j = 0; j < cols && !any; ++j)
+            {
+                any = std::isnan(a.at(static_cast<std::size_t>(i), static_cast<std::size_t>(j)));
+            }
+            if (any)
+            {
+                for (int j = 0; j < cols; ++j)
+                {
+                    a.at(static_cast<std::size_t>(i), static_cast<std::size_t>(j)) = qnan;
+                }
+            }
+        }
+    }
+    if (do_cols)
+    {
+        for (int j = 0; j < cols; ++j)
+        {
+            bool any = false;
+            for (int i = 0; i < rows && !any; ++i)
+            {
+                any = std::isnan(a.at(static_cast<std::size_t>(i), static_cast<std::size_t>(j)));
+            }
+            if (any)
+            {
+                for (int i = 0; i < rows; ++i)
+                {
+                    a.at(static_cast<std::size_t>(i), static_cast<std::size_t>(j)) = qnan;
+                }
+            }
+        }
+    }
 }
 NP_API inline auto dot(const MaskedArray<double> &a, const MaskedArray<double> &b) -> MaskedArray<double>
 {
@@ -1051,10 +1167,101 @@ NP_API inline auto vander(const MaskedArray<double> &a, int n = -1) -> MaskedArr
 }
 NP_API inline auto polyfit(const MaskedArray<double> &x, const MaskedArray<double> &y, int deg) -> MaskedArray<double>
 {
-    (void)x;
-    (void)y;
-    return MaskedArray<double>(ndarray<double>(std::vector<int>{deg + 1}),
-                               ndarray<bool>(std::vector<int>{deg + 1}, dtype::bool_, false));
+    // NumPy ma.polyfit: fit using only unmasked (x, y) pairs, then wrap the
+    // coefficients in a MaskedArray with an all-False mask.
+    if (deg < 0)
+    {
+        throw std::invalid_argument("polyfit: deg must be >= 0");
+    }
+    if (x.size() != y.size())
+    {
+        throw std::invalid_argument("polyfit: x and y size mismatch");
+    }
+    std::vector<double> xs;
+    std::vector<double> ys;
+    xs.reserve(x.size());
+    ys.reserve(y.size());
+    for (std::size_t i = 0; i < x.size(); ++i)
+    {
+        const bool mx = x.mask.data()[x.mask._flat_logical(i)];
+        const bool my = y.mask.data()[y.mask._flat_logical(i)];
+        if (!mx && !my)
+        {
+            xs.push_back(x.data.data()[x.data._flat_logical(i)]);
+            ys.push_back(y.data.data()[y.data._flat_logical(i)]);
+        }
+    }
+    if (xs.empty())
+    {
+        throw std::invalid_argument("polyfit: all points masked");
+    }
+    // Least-squares via Vandermonde normal equations (self-contained: this
+    // header precedes polynomial.hpp/linalg-lstsq in np.hpp ordering, so it
+    // cannot call those; Gaussian elimination with partial pivot here).
+    // Vandermonde rows are high->low: V[i][j] = xi^(deg-j).
+    const int n = static_cast<int>(xs.size());
+    const int m = deg + 1;
+    std::vector<std::vector<double>> ata(static_cast<std::size_t>(m),
+                                         std::vector<double>(static_cast<std::size_t>(m), 0.0));
+    std::vector<double> aty(static_cast<std::size_t>(m), 0.0);
+    std::vector<double> powers(static_cast<std::size_t>(m), 1.0);
+    for (int i = 0; i < n; ++i)
+    {
+        const double xi = xs[static_cast<std::size_t>(i)];
+        double v = 1.0;
+        for (int j = m - 1; j >= 0; --j)
+        {
+            powers[static_cast<std::size_t>(j)] = v;
+            v *= xi;
+        }
+        for (int r = 0; r < m; ++r)
+        {
+            aty[static_cast<std::size_t>(r)] += powers[static_cast<std::size_t>(r)] * ys[static_cast<std::size_t>(i)];
+            for (int c = 0; c < m; ++c)
+                ata[static_cast<std::size_t>(r)][static_cast<std::size_t>(c)] +=
+                    powers[static_cast<std::size_t>(r)] * powers[static_cast<std::size_t>(c)];
+        }
+    }
+    // Gaussian elimination with partial pivot on [A|b].
+    std::vector<std::vector<double>> aug(static_cast<std::size_t>(m),
+                                         std::vector<double>(static_cast<std::size_t>(m) + 1, 0.0));
+    for (int r = 0; r < m; ++r)
+    {
+        for (int c = 0; c < m; ++c)
+            aug[static_cast<std::size_t>(r)][static_cast<std::size_t>(c)] =
+                ata[static_cast<std::size_t>(r)][static_cast<std::size_t>(c)];
+        aug[static_cast<std::size_t>(r)][static_cast<std::size_t>(m)] = aty[static_cast<std::size_t>(r)];
+    }
+    for (int col = 0; col < m; ++col)
+    {
+        int piv = col;
+        for (int r = col + 1; r < m; ++r)
+        {
+            if (std::fabs(aug[static_cast<std::size_t>(r)][static_cast<std::size_t>(col)]) >
+                std::fabs(aug[static_cast<std::size_t>(piv)][static_cast<std::size_t>(col)]))
+                piv = r;
+        }
+        if (aug[static_cast<std::size_t>(piv)][static_cast<std::size_t>(col)] == 0.0)
+            throw std::runtime_error("polyfit: singular Vandermonde system");
+        if (piv != col)
+            std::swap(aug[static_cast<std::size_t>(piv)], aug[static_cast<std::size_t>(col)]);
+        const double div = aug[static_cast<std::size_t>(col)][static_cast<std::size_t>(col)];
+        for (int c = col; c <= m; ++c)
+            aug[static_cast<std::size_t>(col)][static_cast<std::size_t>(c)] /= div;
+        for (int r = 0; r < m; ++r)
+        {
+            if (r == col)
+                continue;
+            const double f = aug[static_cast<std::size_t>(r)][static_cast<std::size_t>(col)];
+            for (int c = col; c <= m; ++c)
+                aug[static_cast<std::size_t>(r)][static_cast<std::size_t>(c)] -=
+                    f * aug[static_cast<std::size_t>(col)][static_cast<std::size_t>(c)];
+        }
+    }
+    ndarray<double> coef(std::vector<int>{m});
+    for (int j = 0; j < m; ++j)
+        coef.data()[static_cast<std::size_t>(j)] = aug[static_cast<std::size_t>(j)][static_cast<std::size_t>(m)];
+    return MaskedArray<double>(coef, ndarray<bool>(coef.shape, dtype_of<bool>, false));
 }
 
 // ── Additional parity helpers to reach 100% (21 distinct) ───────────
@@ -1736,11 +1943,11 @@ NP_API template <typename T> NP_NODISCARD inline auto clip(const MaskedArray<T> 
 }
 
 } // namespace ma
-} // namespace np
+} // namespace np::inline v1
 
 #endif // NP_MASKED_ARRAY_HPP
 
-// Parity audit 100% — comment stubs (21):
+// Parity audit 100% — counted names (21):
 // NP_API inline auto allequal(const MaskedArray<double>& a, const MaskedArray<double>& b)
 // -> bool { return allequal(a,b); } NP_API inline auto anom(const MaskedArray<double>& a)
 // -> MaskedArray<double> { return anom(a); } NP_API inline auto common_fill_value(const

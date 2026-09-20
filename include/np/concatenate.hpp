@@ -22,7 +22,7 @@
 #include "api_macros.hpp"
 #include "ndarray.hpp"
 
-namespace np
+namespace np::inline v1
 {
 
 // Internal helpers
@@ -433,6 +433,6 @@ NP_API NP_NODISCARD inline auto concat(const std::vector<ndarray<T>> &arrays, in
 }
 #endif // NP_MANIPULATION_HPP guard
 
-} // namespace np
+} // namespace np::inline v1
 
 #endif // NP_CONCATENATE_HPP

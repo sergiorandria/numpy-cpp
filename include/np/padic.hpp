@@ -56,7 +56,9 @@
 #include "lattice.hpp"
 #include "ndarray.hpp"
 
-namespace np::padic
+namespace np::inline v1
+{
+namespace padic
 {
 
 // ── Concepts ────────────────────────────────────────────────────────────
@@ -763,7 +765,7 @@ NP_NODISCARD inline PadicLattice<T> to_padic_lattice(const lattice::Lattice<T> &
 {
     return PadicLattice<T>(lat, p, prec);
 }
-// p-adic differential form: Kähler differential over Q_p (stub, uses differential::VM)
+// p-adic differential form: Kähler differential over Q_p (formal derivative via differential::VM)
 struct PadicDifferential
 {
     int p = 2;
@@ -783,6 +785,7 @@ struct PadicDifferential
     }
 };
 
-} // namespace np::padic
+} // namespace padic
+} // namespace np::inline v1
 
 #endif // NP_PADIC_HPP

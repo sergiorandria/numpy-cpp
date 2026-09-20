@@ -25,7 +25,9 @@
 #include <type_traits>
 #include <utility>
 
-namespace np::detail::fixed
+namespace np::inline v1
+{
+namespace detail::fixed
 {
 
 /** @brief True when T is a std::complex instantiation. */
@@ -133,6 +135,7 @@ template <typename Op, typename A, bool Custom = scalar_traits<A>::is_custom> st
     }
 };
 
-} // namespace np::detail::fixed
+} // namespace detail::fixed
+} // namespace np::inline v1
 
 #endif // NP_DETAIL_SCALAR_BUILTIN_HPP

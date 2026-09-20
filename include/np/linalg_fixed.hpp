@@ -58,7 +58,9 @@
 #include "api_macros.hpp"
 #include "linalg.hpp"
 
-namespace np::linalg
+namespace np::inline v1
+{
+namespace linalg
 {
 
 /** @brief Dot product of two 1-D arrays -> scalar (numpy dot, 1D . 1D). */
@@ -1507,6 +1509,7 @@ NP_NODISCARD constexpr auto lstsq(const ndarrayf<T, M, N> &a, const ndarrayf<U, 
     return fixed::LstsqResult<R, N, K>{x, rank, sv};
 }
 
-} // namespace np::linalg
+} // namespace linalg
+} // namespace np::inline v1
 
 #endif // NP_LINALG_FIXED_HPP

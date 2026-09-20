@@ -8,7 +8,7 @@
  * simulation or on physical hardware (Mythic M1076, d-Matrix Jayhawk II,
  * Crossbar Inc, Weebit Nano, or any custom ReRAM macro via callbacks).
  *
- * Real-hardware concerns handled here (vs the 65-line stub it replaces):
+ * Real-hardware concerns handled here (replacing the original 65-line minimal version):
  *  - Device models: linear ion drift (Strukov/HP Labs), Simmons tunnel
  *    barrier, TEAM, VTEAM (Kvatinsky), Yakopcic, Stanford/PKU filament.
  *  - Window functions: Joglekar, Biolek, Prodromakis, Kvatinsky prodromakis.
@@ -90,7 +90,9 @@
 #include <utility>
 #include <vector>
 
-namespace np::analog
+namespace np::inline v1
+{
+namespace analog
 {
 
 template <typename T>
@@ -450,18 +452,18 @@ class Crossbar
     ndarray<float> weights; ///< ideal normalized weights ([N,M] or [M] row); conductance-mapped on apply
 
     Crossbar() = default;
-    explicit Crossbar(ndarray<float> w) : weights(std::move(w))
+    explicit Crossbar(ndarray<float> w) : weights(normalize_(std::move(w)))
     {
         validate_();
     }
-    Crossbar(ndarray<float> w, MemristorConfig cfg) : weights(std::move(w)), config_(cfg)
+    Crossbar(ndarray<float> w, MemristorConfig cfg) : weights(normalize_(std::move(w))), config_(cfg)
     {
         validate_();
         if (needs_stuck_mask_())
             init_fault_mask_(config_.seed);
     }
     Crossbar(ndarray<float> w, MemristorConfig cfg, CalibrationTable cal)
-        : weights(std::move(w)), config_(cfg), calibration_(std::move(cal))
+        : weights(normalize_(std::move(w))), config_(cfg), calibration_(std::move(cal))
     {
         validate_();
         if (needs_stuck_mask_())
@@ -570,24 +572,32 @@ class Crossbar
         }
         if (x.ndim() != 1)
             throw std::invalid_argument("Crossbar::dot: x must be 1-D");
+        // Physical data[] indexing below needs contiguity; normalize views.
+        const ndarray<float> *xp = &x;
+        ndarray<float> xflat;
+        if (!x.is_contiguous())
+        {
+            xflat = x.flatten();
+            xp = &xflat;
+        }
         if (wcopy.ndim() == 1)
         {
-            if (static_cast<int>(x.size()) != static_cast<int>(wcopy.size()))
+            if (xp->size() != wcopy.size())
                 throw std::invalid_argument("Crossbar::dot: size mismatch (1-D weights)");
-            ndarray<float> y(std::vector<int>{1});
             double acc = 0.0;
-            for (std::size_t i = 0; i < x.size(); ++i)
-                acc += static_cast<double>(x.data()[i]) * static_cast<double>(wcopy.data()[i]);
+            for (std::size_t i = 0; i < xp->size(); ++i)
+                acc += static_cast<double>(xp->data()[i]) * static_cast<double>(wcopy.data()[i]);
+            ndarray<float> y(std::vector<int>{1});
             y.data()[0] = static_cast<float>(acc);
-            return y.reshape({static_cast<int>(y.size())});
+            return y;
         }
         if (wcopy.ndim() != 2)
             throw std::invalid_argument("Crossbar::dot: weights must be 1-D or 2-D");
         const int n = wcopy.shape[0];
-        if (static_cast<int>(x.size()) != n)
+        if (static_cast<int>(xp->size()) != n)
             throw std::invalid_argument("Crossbar::dot: x size must match weights rows");
         // O(1) analog V=IR: dot as matmul with weights^T
-        auto xt = x.reshape({n, 1});
+        auto xt = xp->reshape({n, 1});
         auto wt = wcopy.transpose();
         auto y = linalg::matmul(wt, xt);
         return y.reshape({static_cast<int>(y.size())});
@@ -624,9 +634,9 @@ class Crossbar
         const int b = X.shape[0];
         const int n = X.shape[1];
         ndarray<float> Y(std::vector<int>{b, cols()});
+        ndarray<float> row(std::vector<int>{n});
         for (int r = 0; r < b; ++r)
         {
-            ndarray<float> row(std::vector<int>{n});
             for (int i = 0; i < n; ++i)
                 row.data()[static_cast<std::size_t>(i)] = X(r, i);
             auto y = apply(row);
@@ -647,21 +657,14 @@ class Crossbar
         }
         if (wcopy.ndim() != 2 || B.ndim() != 2)
             throw std::invalid_argument("Crossbar::matmul: both operands must be 2-D");
-        // Route each RHS column through the analog VMM for realism when noisy
+        // Route each RHS column through the analog VMM for realism when noisy.
+        // Per-column analog path is future work; today this is ideal matmul
+        // plus calibrated read/ADC error so shapes stay exact.
         if (is_noisy_())
         {
             const int m = B.shape[0];
-            const int k = B.shape[1];
             if (wcopy.shape[1] != m)
                 throw std::invalid_argument("Crossbar::matmul: inner dims must match");
-            ndarray<float> Y(std::vector<int>{wcopy.shape[0], k});
-            for (int c = 0; c < k; ++c)
-            {
-                // column of B^T is a VMM vector over the transposed problem;
-                // emulate by applying rows of W^T — here we fall back to ideal
-                // matmul then add calibrated error so shapes stay exact.
-                (void)c;
-            }
             auto ideal = linalg::matmul(wcopy, B);
             return add_array_error_(ideal);
         }
@@ -690,20 +693,42 @@ class Crossbar
         return q;
     }
 
-    // Cell-level (conductance) quantization copy
+    // Cell-level (conductance) quantization copy.
+    // The inverse map mirrors weight_to_conductance per mapping scheme so
+    // quantized weights round-trip (up to the cell step). Differential pairs
+    // are bipolar: quantize the magnitude in weight domain (each device
+    // holds a non-negative w01 level) instead of pushing signed Geff
+    // through the single-ended [goff,gon] clamp, which would destroy signs.
     NP_NODISCARD Crossbar quantized() const
     {
         Crossbar out(*this);
         std::unique_lock lock(out.mtx_);
+        const double goff = detail::g_off(out.config_);
+        const double gon = detail::g_on(out.config_);
+        const double denom = gon - goff > 1e-30 ? gon - goff : 1e-30;
+        const bool is_diff = out.config_.mapping == MappingScheme::DifferentialPair;
+        const double gref = (gon + goff) * 0.5;
+        const double levels = (out.config_.cell_bits > 0 && out.config_.cell_bits < 30)
+                                  ? static_cast<double>((1u << static_cast<unsigned>(out.config_.cell_bits)) - 1u)
+                                  : 0.0;
         for (auto &v : out.weights.data())
         {
-            const double g = detail::weight_to_conductance(v, out.config_, &out.calibration_);
-            const double gq = detail::quantize_conductance(g, out.config_);
-            // map back to normalized weight via inverse linear map
-            const double goff = detail::g_off(out.config_);
-            const double gon = detail::g_on(out.config_);
-            double w01 = (gq - goff) / (gon - goff + 1e-30);
-            v = static_cast<float>(detail::clamp01(w01) * 2.0 - 1.0);
+            double w = 0.0;
+            if (is_diff && levels > 0.0)
+            {
+                const double mag = std::clamp(std::abs(static_cast<double>(v)), 0.0, 1.0);
+                w = (v >= 0 ? 1.0 : -1.0) * std::round(mag * levels) / levels;
+            }
+            else
+            {
+                const double g = detail::weight_to_conductance(v, out.config_, &out.calibration_);
+                const double gq = detail::quantize_conductance(g, out.config_);
+                // single-ended: gq ~= goff + w01*(gon-goff); offset-sub:
+                // gq ~= goff + w01*(gon-goff) - gref
+                double w01 = (gq + (out.config_.mapping == MappingScheme::OffsetSubtraction ? gref : 0.0) - goff) / denom;
+                w = detail::clamp01(w01) * 2.0 - 1.0;
+            }
+            v = static_cast<float>(w);
         }
         return out;
     }
@@ -753,44 +778,62 @@ class Crossbar
     ProgramResult program(const ndarray<float> &target, ProgramOptions opts = {})
     {
         validate_like_(target);
+        if (opts.max_iters <= 0)
+            throw std::invalid_argument("Crossbar::program: max_iters must be positive");
+        if (!(opts.tol >= 0.0))
+            throw std::invalid_argument("Crossbar::program: tol must be non-negative");
+        // Snapshot under lock; iterate locally so concurrent readers are not
+        // blocked for the whole write-verify loop. The result is committed
+        // atomically at the end (concurrent writes during program are lost).
+        MemristorConfig cfg;
+        ndarray<float> local;
+        {
+            std::shared_lock lock(mtx_);
+            cfg = config_;
+            local = weights;
+        }
+        // Normalize target view once (physical data[] indexing below).
+        const ndarray<float> *tp = &target;
+        ndarray<float> tflat;
+        if (!target.is_contiguous())
+        {
+            tflat = target.flatten();
+            tp = &tflat;
+        }
         ProgramResult r{};
-        // Write-and-verify with write noise; state dynamics optional per model
-        std::mt19937_64 rng(config_.seed ^ 0xC0FFEEu);
         // NB: normal_distribution requires stddev > 0 at construction; the 1.0 fallback is never
         // sampled (all uses are guarded by `write_noise_std > 0.0`).
-        std::normal_distribution<double> wn(0.0, config_.write_noise_std > 0.0 ? config_.write_noise_std : 1.0);
+        std::mt19937_64 rng(cfg.seed ^ 0xC0FFEEu);
+        std::normal_distribution<double> wn(0.0, cfg.write_noise_std > 0.0 ? cfg.write_noise_std : 1.0);
         for (int it = 0; it < opts.max_iters; ++it)
         {
             r.iters = it + 1;
             double mx = 0.0;
+            for (std::size_t i = 0; i < local.size(); ++i)
             {
-                std::unique_lock lock(mtx_);
-                for (std::size_t i = 0; i < weights.size(); ++i)
+                const double t = static_cast<double>(tp->data()[i]);
+                double cur = static_cast<double>(local.data()[i]);
+                double step = t - cur;
+                // model-aware slew: TEAM-family moves incrementally
+                if (cfg.model != DeviceModel::Ideal)
                 {
-                    const double t = static_cast<double>(target.data()[i]);
-                    double cur = static_cast<double>(weights.data()[i]);
-                    double step = t - cur;
-                    // model-aware slew: TEAM-family moves incrementally
-                    if (config_.model != DeviceModel::Ideal)
-                    {
-                        const double v = step >= 0 ? opts.pulse_amplitude : -opts.pulse_amplitude;
-                        const double dt = opts.pulse_width_ns * 1e-9;
-                        double w01 = detail::weight_to_state(cur);
-                        w01 = detail::state_update(w01, v, dt, config_);
-                        cur = w01 * 2.0 - 1.0;
-                        // relax toward target (filament granularity)
-                        cur += step * 0.5;
-                    }
-                    else
-                    {
-                        cur = t;
-                    }
-                    if (config_.write_noise_std > 0.0)
-                        cur += wn(rng) * 2.0;
-                    cur = std::clamp(cur, -1.0, 1.0);
-                    weights.data()[i] = static_cast<float>(cur);
-                    mx = std::max(mx, std::abs(cur - t));
+                    const double v = step >= 0 ? opts.pulse_amplitude : -opts.pulse_amplitude;
+                    const double dt = opts.pulse_width_ns * 1e-9;
+                    double w01 = detail::weight_to_state(cur);
+                    w01 = detail::state_update(w01, v, dt, cfg);
+                    cur = w01 * 2.0 - 1.0;
+                    // relax toward target (filament granularity)
+                    cur += step * 0.5;
                 }
+                else
+                {
+                    cur = t;
+                }
+                if (cfg.write_noise_std > 0.0)
+                    cur += wn(rng) * 2.0;
+                cur = std::clamp(cur, -1.0, 1.0);
+                local.data()[i] = static_cast<float>(cur);
+                mx = std::max(mx, std::abs(cur - t));
             }
             r.max_error = mx;
             if (!opts.verify)
@@ -801,8 +844,10 @@ class Crossbar
                 break;
             }
         }
-        if (r.iters == opts.max_iters && r.max_error <= opts.tol)
-            r.converged = true;
+        {
+            std::unique_lock lock(mtx_);
+            weights = std::move(local);
+        }
         r.energy_pj = energy_pj() * static_cast<double>(r.iters);
         return r;
     }
@@ -864,8 +909,16 @@ class Crossbar
 
     NP_NODISCARD double self_test(int n_vectors = 8, double tol = 1e-2) const
     {
-        const int n = const_cast<Crossbar *>(this)->rows_safe_();
-        const int m = const_cast<Crossbar *>(this)->cols_safe_();
+        // Returns worst-case cosine similarity in [0,1] between ideal dot()
+        // and analog apply() over random unit vectors. `tol` validates the
+        // call (must be in (0,1]) and is the acceptance threshold the caller
+        // compares the returned fidelity against.
+        if (n_vectors <= 0)
+            throw std::invalid_argument("Crossbar::self_test: n_vectors must be positive");
+        if (!(tol > 0.0) || !(tol <= 1.0))
+            throw std::invalid_argument("Crossbar::self_test: tol must be in (0,1]");
+        const int n = rows_safe_();
+        const int m = cols_safe_();
         if (n == 0 || m == 0)
             return 1.0;
         std::mt19937_64 rng(42);
@@ -895,7 +948,6 @@ class Crossbar
             }
             const double fid = num / (std::sqrt(di * dn) + 1e-30);
             worst = std::min(worst, fid);
-            (void)tol;
         }
         return std::clamp(worst, 0.0, 1.0);
     }
@@ -944,6 +996,14 @@ class Crossbar
             return weights.shape[1];
         return 1;
     }
+    // Views alias strided storage; all physical data[] indexing below
+    // assumes contiguity, so normalize once at construction.
+    static ndarray<float> normalize_(ndarray<float> w)
+    {
+        if (w.size() != 0 && !w.is_contiguous())
+            return w.flatten();
+        return w;
+    }
     bool needs_stuck_mask_() const noexcept
     {
         return config_.stuck_on_prob > 0.0 || config_.stuck_off_prob > 0.0;
@@ -982,7 +1042,6 @@ class Crossbar
     {
         std::shared_lock lock(mtx_);
         ndarray<float> out = weights;
-        const bool is_diff = config_.mapping == MappingScheme::DifferentialPair;
         const double step = (config_.cell_bits > 0 && config_.cell_bits < 30)
                                 ? 1.0 / static_cast<double>((1u << static_cast<unsigned>(config_.cell_bits)) - 1u)
                                 : 0.0;
@@ -992,7 +1051,6 @@ class Crossbar
             const double t0 = config_.drift_t0_s > 0.0 ? config_.drift_t0_s : 1.0;
             drift_factor = std::pow((drift_seconds_ + t0) / t0, -config_.drift_nu);
         }
-        (void)is_diff;
         for (std::size_t i = 0; i < out.size(); ++i)
         {
             double wv = std::clamp(static_cast<double>(out.data()[i]), -1.0, 1.0);
@@ -1016,9 +1074,8 @@ class Crossbar
 
     ndarray<float> dot_identity_probe_(bool noisy) const
     {
-        const int n = const_cast<Crossbar *>(this)->rows_safe_();
-        const int m = const_cast<Crossbar *>(this)->cols_safe_();
-        if (n == 0 || m == 0)
+        const int n = rows_safe_();
+        if (n == 0)
             return ndarray<float>();
         // probe with normalized ones vector
         ndarray<float> x(std::vector<int>{n});
@@ -1031,7 +1088,11 @@ class Crossbar
 
     ndarray<float> add_array_error_(const ndarray<float> &ideal) const
     {
-        auto [cfg, cal] = snapshot_cfg();
+        MemristorConfig cfg;
+        {
+            std::shared_lock lock(mtx_);
+            cfg = config_;
+        }
         if (cfg.read_noise_std == 0.0 && cfg.adc_bits == 0)
             return ideal;
         std::mt19937_64 rng(cfg.seed ^ 0xADC0u);
@@ -1051,7 +1112,6 @@ class Crossbar
             y = detail::quantize_adc(y, fs, cfg.adc_bits);
             v = static_cast<float>(y);
         }
-        (void)cal;
         return out;
     }
 
@@ -1075,16 +1135,24 @@ class Crossbar
             cal = *override_cal;
         if (x.ndim() != 1)
             throw std::invalid_argument("Crossbar::apply: x must be 1-D");
+        // Physical data[] indexing below needs contiguity; normalize views.
+        const ndarray<float> *xp = &x;
+        ndarray<float> xflat;
+        if (!x.is_contiguous())
+        {
+            xflat = x.flatten();
+            xp = &xflat;
+        }
         const int n = wcopy.ndim() == 2 ? wcopy.shape[0] : static_cast<int>(wcopy.size());
         const int m = wcopy.ndim() == 2 ? wcopy.shape[1] : 1;
-        if (static_cast<int>(x.size()) != n)
+        if (static_cast<int>(xp->size()) != n)
             throw std::invalid_argument("Crossbar::apply: x size must match weights rows");
 
         // DAC: quantize normalized inputs to [-1,1]
         std::vector<double> vin(static_cast<std::size_t>(n));
         for (int i = 0; i < n; ++i)
             vin[static_cast<std::size_t>(i)] =
-                detail::quantize_dac(static_cast<double>(x.data()[static_cast<std::size_t>(i)]), cfg.dac_bits);
+                detail::quantize_dac(static_cast<double>(xp->data()[static_cast<std::size_t>(i)]), cfg.dac_bits);
 
         // Effective bipolar conductance per cell + raw conductance for IR drop.
         // Model (keeps dot() parity exact in the ideal limit by construction):
@@ -1246,8 +1314,6 @@ struct SimBackend : IMemristorBackend
     {
         std::unique_lock lock(mtx_);
         programmed_W_ = cb.snapshot_weights();
-        auto [cfg, cal] = cb.snapshot_cfg();
-        (void)cfg;
         has_W_ = true;
     }
     void calibrate(const CalibrationTable &tbl) override
@@ -1314,7 +1380,7 @@ struct NoisySimBackend : SimBackend
         cfg_.temperature_c = ccfg.temperature_c;
         cfg_.r_on = ccfg.r_on;
         cfg_.r_off = ccfg.r_off;
-        (void)ccal;
+        (void)ccal; // calibration intentionally stays backend-local
         has_W_ = true;
     }
     NP_NODISCARD ndarray<float> execute(const ndarray<float> &input) override
@@ -1527,11 +1593,16 @@ struct DifferentialCrossbar
         MemristorConfig c = cfg;
         c.mapping = MappingScheme::SingleEnded;
         ndarray<float> wp(w.shape), wn(w.shape);
-        for (std::size_t i = 0; i < w.size(); ++i)
+        // Logical access: w may be a strided view (wp/wn are fresh contiguous).
+        np::detail::Odometer od(w.shape);
+        std::size_t lin = 0;
+        while (!od.done())
         {
-            const double v = static_cast<double>(w.data()[i]);
-            wp.data()[i] = static_cast<float>(v >= 0 ? v : 0.0f);
-            wn.data()[i] = static_cast<float>(v < 0 ? -v : 0.0f);
+            const double v = static_cast<double>(w.get(od.idx()));
+            wp.data()[lin] = static_cast<float>(v >= 0 ? v : 0.0f);
+            wn.data()[lin] = static_cast<float>(v < 0 ? -v : 0.0f);
+            ++lin;
+            od.advance();
         }
         pos = Crossbar(wp, c);
         neg = Crossbar(wn, c);
@@ -1816,9 +1887,11 @@ template <AnalogScalar T> NP_NODISCARD inline ndarray<float> quantize_weights(co
         throw std::invalid_argument("quantize_weights: bits in [1,30]");
     ndarray<float> q(w.shape);
     const float scale = static_cast<float>((1u << static_cast<unsigned>(bits)) - 1u);
-    for (std::size_t i = 0; i < w.size(); ++i)
+    // Logical iteration: w may be a strided view (q is fresh contiguous).
+    std::size_t i = 0;
+    for (auto it = w.begin(); it != w.end(); ++it, ++i)
     {
-        const float v = std::clamp(static_cast<float>(w.data()[i]), -1.0f, 1.0f);
+        const float v = std::clamp(static_cast<float>(*it), -1.0f, 1.0f);
         q.data()[i] = std::round(v * scale) / scale;
     }
     return q;
@@ -1830,6 +1903,7 @@ NP_NODISCARD inline double window_value(double w01, double polarity, WindowFunct
     return detail::window_fn(w01, polarity, wf, p);
 }
 
-} // namespace np::analog
+} // namespace analog
+} // namespace np::inline v1
 
 #endif // NP_MEMRISTOR_HPP

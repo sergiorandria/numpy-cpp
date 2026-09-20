@@ -30,7 +30,9 @@
 #include "homology.hpp"
 #include "lattice.hpp"
 
-namespace np::spectral
+namespace np::inline v1
+{
+namespace spectral
 {
 
 struct SpectralSequencePage
@@ -256,6 +258,7 @@ NP_NODISCARD inline SpectralSequence lattice_spectral(const lattice::Lattice<dou
     return ss;
 }
 
-} // namespace np::spectral
+} // namespace spectral
+} // namespace np::inline v1
 
 #endif // NP_SPECTRAL_HPP

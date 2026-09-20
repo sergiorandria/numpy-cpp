@@ -59,6 +59,9 @@
 #if defined(__linux__)
 #include <sys/mman.h>
 #endif
+#if defined(_WIN32)
+#include <malloc.h>
+#endif
 
 #if defined(__has_include)
 #if __has_include(<dlfcn.h>) && !defined(_WIN32)
@@ -84,7 +87,9 @@
 #error "NP_ENABLE_CUDA requires <cuda_runtime.h> (CUDA toolkit); else use -DNP_ENABLE_GPU."
 #endif
 
-namespace np::gpu
+namespace np::inline v1
+{
+namespace gpu
 {
 
 /// @brief Machine-readable reason for the last CUDA-path outcome.
@@ -1096,6 +1101,32 @@ NP_NODISCARD inline bool try_fft(const Cplx *in, Cplx *out, std::size_t N, bool 
     return false;
 }
 
+namespace detail
+{
+// Portable 64-byte aligned allocation.
+// MSVC does not provide std::aligned_alloc (C11); use _aligned_malloc there.
+inline void *aligned_alloc_64(std::size_t bytes) noexcept
+{
+    if (bytes == 0)
+        bytes = 1;
+    const std::size_t rounded = ((bytes + 63) / 64) * 64;
+#if defined(_WIN32)
+    return _aligned_malloc(rounded, 64);
+#else
+    return std::aligned_alloc(64, rounded);
+#endif
+}
+
+inline void aligned_free_64(void *p) noexcept
+{
+#if defined(_WIN32)
+    _aligned_free(p);
+#else
+    std::free(p);
+#endif
+}
+} // namespace detail
+
 inline void *pinned_alloc(std::size_t bytes) noexcept
 {
 #if defined(NP_GPU_HAS_CUDA_RUNTIME)
@@ -1109,7 +1140,7 @@ inline void *pinned_alloc(std::size_t bytes) noexcept
     }
 #endif
 #if defined(__linux__)
-    void *p = std::aligned_alloc(64, ((bytes + 63) / 64) * 64);
+    void *p = detail::aligned_alloc_64(bytes);
     if (p)
     {
 #ifdef MADV_HUGEPAGE
@@ -1118,7 +1149,7 @@ inline void *pinned_alloc(std::size_t bytes) noexcept
     }
     return p;
 #else
-    return std::aligned_alloc(64, ((bytes + 63) / 64) * 64);
+    return detail::aligned_alloc_64(bytes);
 #endif
 }
 
@@ -1132,7 +1163,7 @@ inline void pinned_free(void *p, std::size_t bytes) noexcept
 #if defined(__linux__)
     (void)bytes;
 #endif
-    std::free(p);
+    detail::aligned_free_64(p);
 }
 
 // Unified managed memory via dlopen cudaMallocManaged (no link-time dep).
@@ -1487,8 +1518,9 @@ inline void async_free(void *p, void *stream = nullptr) noexcept
 // cudaGraphExec_t cache with per-call node updates for the changing device
 // pointers — machinery whose maintenance cost exceeds the marginal replay
 // gain over already-asynchronous per-entry GEMMs. There is no graph batch
-// path, none is planned, and no stub remains pretending otherwise.
+// path, none is planned, and nothing here pretends otherwise.
 
-} // namespace np::gpu
+} // namespace gpu
+} // namespace np::inline v1
 
 #endif // NP_GPU_HPP

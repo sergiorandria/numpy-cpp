@@ -39,7 +39,7 @@
 #include "api_macros.hpp"
 #include "ndarray_fixed.hpp"
 
-namespace np
+namespace np::inline v1
 {
 
 /* @brief Array of zeros with the given compile-time shape. Two spellings:
@@ -426,6 +426,6 @@ NP_NODISCARD auto require(ndarrayf<T, E...> &&a, const std::string &requirements
     return std::move(a);
 }
 
-} // namespace np
+} // namespace np::inline v1
 
 #endif // NP_CREATION_FIXED_HPP
